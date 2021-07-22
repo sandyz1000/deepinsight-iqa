@@ -2,6 +2,7 @@ from threading import Lock
 import os
 import json
 import numpy as np
+import glob
 
 
 def load_samples(samples_file):
@@ -16,6 +17,24 @@ def load_json(file_path):
 def save_json(data, target_file):
     with open(target_file, 'w') as f:
         json.dump(data, f, indent=2, sort_keys=True)
+
+
+def image_file_to_json(img_path: str):
+    img_dir = os.path.dirname(img_path)
+    img_id = os.path.basename(img_path).split('.')[0]
+
+    return img_dir, [{'image_id': img_id}]
+
+
+def image_dir_to_json(img_dir: str, img_type: str = 'jpg'):
+    img_paths = glob.glob(os.path.join(img_dir, '*.' + img_type))
+
+    samples = []
+    for img_path in img_paths:
+        img_id = os.path.basename(img_path).split('.')[0]
+        samples.append({'image_id': img_id})
+
+    return samples
 
 
 def normalize_labels(labels):
