@@ -45,3 +45,28 @@ def thread_safe_memoize(func):
         return cache[key]
 
     return memoizer
+
+
+class thread_safe_singleton:
+    _instances = {}
+    session_lock = Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls.session_lock:
+            if cls not in cls._instances:
+                cls._instances[cls] = super(thread_safe_singleton, cls).__new__(cls, *args, **kwargs)
+            return cls._instances[cls]
+
+
+def set_gpu_limit(limit=2):
+    import tensorflow as tf
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if len(gpus) > 0:
+        try:
+            tf.config.experimental.set_virtual_device_configuration(gpus[0], [
+                tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024 * limit)]
+            )
+            return f"GPU Limit set to: {1024*limit} MB"
+        except RuntimeError as e:
+            raise e
+

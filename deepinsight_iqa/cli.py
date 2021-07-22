@@ -15,6 +15,7 @@ def ensure_dir_exists(dir):
         os.makedirs(dir)
 
 
+
 def executor(dstype=("tid2013", "live"), use_pretrained=False, use_augmentation=False,
              batch_size=1, epochs=1):
     """ 
@@ -48,12 +49,11 @@ def parse_config(job_dir, config_file):
 
 
 @click.command()
-@click.option('-m', '--algo', required=True, show_choices=["lbp", "nima", "diqa"], help="Pass algorithm to train")
+@click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
 def train(algo, conf_file, input_file, image_dir):
-    assert algo in ["lbp", "nima", "diqa"], "Invalid algorithm args for training"
     job_dir = _BASE_DIRNAME
     cfg = parse_config(job_dir, conf_file)
     train_mod = importlib.import_module(f".{algo}.train")
@@ -63,9 +63,6 @@ def train(algo, conf_file, input_file, image_dir):
         train_mod.train(samples=samples, job_dir=job_dir, image_dir=image_dir, **cfg)
         return 0
 
-    elif algo == "lbp":
-        return 0
-
     elif algo == "diqa":
         trainer = train_mod.TrainDeepIMAWithGenerator(image_dir, input_file, **cfg)
         trainer.keras_init_train()
@@ -73,12 +70,11 @@ def train(algo, conf_file, input_file, image_dir):
 
 
 @click.command()
-@click.option('-m', '--algo', required=True, show_choices=["lbp", "nima", "diqa"], help="Pass algorithm to train")
+@click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
 def evaluate(algo, conf_file, input_file, image_dir):
-    assert algo in ["lbp", "nima", "diqa"], "Invalid algorithm args for evals"
     job_dir = _BASE_DIRNAME
     cfg = parse_config(job_dir, conf_file)
     evals_mod = importlib.import_module(f".{algo}.evals")
