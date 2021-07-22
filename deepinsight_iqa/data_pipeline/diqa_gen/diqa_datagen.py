@@ -1,7 +1,7 @@
 import itertools
 from typing import Tuple, Callable, Dict
 import pandas as pd
-from pixar_common import image_aug
+from deepinsight_iqa.common import image_aug
 import tensorflow as tf
 import numpy as np
 from keras.applications.imagenet_utils import preprocess_input
@@ -32,14 +32,17 @@ class InvalidParserError(Exception):
 class DiqaDataGenerator(tf.keras.utils.Sequence):
     '''inherits from Keras Sequence base object, allows to use multiprocessing in .fit_generator'''
 
-    def __init__(self,
-                 df: pd.DataFrame,
-                 img_dir: str,
-                 batch_size: int = 32,
-                 img_preprocessing: Callable = None,
-                 target_size: Tuple[int] = (256, 256),
-                 img_crop_dims: Tuple[int] = (224, 224),
-                 shuffle: bool = False):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        img_dir: str,
+        batch_size: int = 32,
+        img_preprocessing: Callable = None,
+        target_size: Tuple[int] = (256, 256),
+        img_crop_dims: Tuple[int] = (224, 224),
+        shuffle: bool = False,
+        check_dir_availability=True,
+    ):
         self.shuffle = shuffle
         df = df.sample(frac=1)
         self.samples = df.to_records()
@@ -49,7 +52,8 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         self.target_size = target_size  # dimensions that images get resized into when loaded
         self.img_crop_dims = img_crop_dims  # dimensions that images get randomly cropped to
         self.__data_generator = self.__train_datagen__ if shuffle else self.__eval_datagen__
-        assert self._validate(), "All Image location not avaliable for the given dataset type"
+        if check_dir_availability:
+            self._validate()  # All Image location not avaliable for the given dataset type
         self.on_epoch_end()  # call ensures that samples are shuffled in first epoch if shuffle is set to True
 
     def __len__(self):
@@ -61,7 +65,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         :param row: dataframe rows
         :type row: pd.Dataframe
         """
-        raise NotImplementedError
+        pass
 
     @abstractmethod
     def _validate(self):
@@ -83,9 +87,11 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
             np.random.shuffle(self.indexes)
 
     def _augmentation(self, img, rand_crop_dims=200):
-        sequential = [(lambda img, crop_dims=rand_crop_dims: image_aug.random_crop(img, crop_dims)),
-                      image_aug.random_horizontal_flip, image_aug.random_vertical_flip]
-
+        sequential = [
+            (lambda img: image_aug.random_crop(img, rand_crop_dims)),
+            image_aug.random_horizontal_flip, image_aug.random_vertical_flip
+        ]
+        # TODO: Apply augmentation based on paramenter supplied by the user
         for _func in sequential:
             img = _func(img)
         return img
@@ -204,7 +210,7 @@ class AVADataRowParser(DiqaDataGenerator):
             target_size: Tuple[int] = (256, 256),
             img_crop_dims: Tuple[int] = (224, 224),
             shuffle: bool = False):
-        
+
         lines = tf.io.gfile.GFile(ava_txt).readlines().split()
         # TODO: Fix below dataframe code
 
@@ -220,7 +226,7 @@ class AVADataRowParser(DiqaDataGenerator):
                                                img_preprocessing=img_preprocessing,
                                                target_size=target_size,
                                                img_crop_dims=img_crop_dims, shuffle=shuffle)
-        
+
     def normalize_labels(self, labels):
         labels_np = np.array(labels)
         return labels_np / labels_np.sum()

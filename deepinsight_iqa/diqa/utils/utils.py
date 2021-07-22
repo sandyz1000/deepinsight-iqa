@@ -1,9 +1,6 @@
 import math
-import typing
 import tensorflow as tf
-import csv
 import numpy as np
-from threading import Lock
 from matplotlib import pyplot as plt
 
 
@@ -68,25 +65,6 @@ def read_image(filename: str, **kwargs) -> tf.Tensor:
     return tf.image.decode_image(stream, **kwargs)
 
 
-def show_images(images: typing.List[tf.Tensor], **kwargs):
-    fig, axs = plt.subplots(1, len(images), figsize=(19, 10))
-    for image, ax in zip(images, axs):
-        assert image.get_shape().ndims in (3, 4), 'The tensor must be of dimension 3 or 4'
-        if image.get_shape().ndims == 4:
-            image = tf.squeeze(image)
-
-        _ = ax.imshow(image, **kwargs)
-        ax.axis('off')
-    fig.tight_layout()
-
-
-def load_samples(sample_file):
-    with open(sample_file) as csv_file:
-        csv_reader = csv.DictReader(csv_file, delimiter=',')
-        for row in csv_reader:
-            yield row
-            
-
 def random_crop(img, crop_dims):
     h, w = img.shape[0], img.shape[1]
     ch, cw = crop_dims[0], crop_dims[1]
@@ -115,38 +93,23 @@ def random_horizontal_flip(img):
     return img
 
 
-def thread_safe_memoize(func):
-    cache = {}
-    session_lock = Lock()
-    
-    def memoizer(*args, **kwargs):
-        with session_lock:
-            key = str(args) + str(kwargs)
-            if key not in cache:
-                cache[key] = func(*args, **kwargs)
-        return cache[key]
-
-    return memoizer
-
-
-# ##
 def image_preprocess(image: tf.Tensor, SCALING_FACTOR=1 / 4) -> tf.Tensor:
     """
     #### Image Normalization
-    
+
     The first step for DIQA is to pre-process the images. The image is converted into grayscale, 
     and then a low-pass filter is applied. The low-pass filter is defined as:
-    
+
     \begin{align*}
     \hat{I} = I_{gray} - I^{low}
     \end{align*}
-    
+
     where the low-frequency image is the result of the following algorithm:
-    
+
     1. Blur the grayscale image.
     2. Downscale it by a factor of SCALING_FACTOR.
     3. Upscale it back to the original size.
-    
+
     The main reasons for this normalization are (1) the Human Visual System (HVS) is not sensitive to changes 
     in the low-frequency band, and (2) image distortions barely affect the low-frequency component of images.
 
@@ -265,15 +228,21 @@ def gradient(model, x, y_true, r):
     return loss_value, tape.gradient(loss_value, model.trainable_variables)
 
 
-def calculate_error_map(features, SCALING_FACTOR=1 / 32):
-    I_d = image_preprocess(features['distorted_image'])
-    I_r = image_preprocess(features['reference_image'])
-    r = rescale(average_reliability_map(I_d, 0.2), SCALING_FACTOR)
-    e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
-    return (I_d, e_gt, r)
+# def calculate_error_map(features, SCALING_FACTOR=1 / 32):
+#     I_d = image_preprocess(features['distorted_image'])
+#     I_r = image_preprocess(features['reference_image'])
+#     r = rescale(average_reliability_map(I_d, 0.2), SCALING_FACTOR)
+#     e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
+#     return (I_d, e_gt, r)
 
 
 def calculate_subjective_score(features, key='mos'):
     I_d = image_preprocess(features['distorted_image'])
     mos = features[key]
     return (I_d, mos)
+
+
+def calculate_error_map(I_d: tf.Tensor, I_r: tf.Tensor, SCALING_FACTOR: float = 1. / 32):
+    r = rescale(average_reliability_map(I_d, 0.2), SCALING_FACTOR)
+    e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
+    return (I_d, e_gt, r)

@@ -5,17 +5,6 @@ import importlib
 _BASE_DIRNAME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
 
-def load_json(file_path):
-    with open(file_path, 'r') as f:
-        return json.load(f)
-
-
-def ensure_dir_exists(dir):
-    if not os.path.exists(dir):
-        os.makedirs(dir)
-
-
-
 def executor(dstype=("tid2013", "live"), use_pretrained=False, use_augmentation=False,
              batch_size=1, epochs=1):
     """ 
@@ -40,11 +29,15 @@ def executor(dstype=("tid2013", "live"), use_pretrained=False, use_augmentation=
 
     # TODO: Evaluate model (Write method for evaluation)
 
+# Script use to predict Image quality using Deep image quality assesement
+def predict():
+    pass
+
 
 def parse_config(job_dir, config_file):
-    ensure_dir_exists(os.path.join(job_dir, 'weights'))
-    ensure_dir_exists(os.paisth.join(job_dir, 'logs'))
-    config = load_json(config_file)
+    os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
+    os.makedirs(os.paisth.join(job_dir, 'logs'), exist_ok=True)
+    config = json.load(open(config_file, 'r'))
     return config
 
 

@@ -1,5 +1,8 @@
+from typing import List
 from PIL import Image as IMG
 import numpy as np
+import tensorflow as tf
+import csv
 from skimage import feature
 import matplotlib.pyplot as plt
 from threading import Lock
@@ -31,6 +34,25 @@ def plot_image(img_path):
     fig.tight_layout()
 
     plt.show()
+
+
+def load_samples(sample_file):
+    with open(sample_file) as csv_file:
+        csv_reader = csv.DictReader(csv_file, delimiter=',')
+        for row in csv_reader:
+            yield row
+
+
+def show_images(images: List[tf.Tensor], **kwargs):
+    fig, axs = plt.subplots(1, len(images), figsize=(19, 10))
+    for image, ax in zip(images, axs):
+        assert image.get_shape().ndims in (3, 4), 'The tensor must be of dimension 3 or 4'
+        if image.get_shape().ndims == 4:
+            image = tf.squeeze(image)
+
+        _ = ax.imshow(image, **kwargs)
+        ax.axis('off')
+    fig.tight_layout()
 
 
 def thread_safe_memoize(func):
@@ -69,4 +91,3 @@ def set_gpu_limit(limit=2):
             return f"GPU Limit set to: {1024*limit} MB"
         except RuntimeError as e:
             raise e
-
