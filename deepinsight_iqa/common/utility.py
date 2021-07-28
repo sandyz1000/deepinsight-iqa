@@ -73,10 +73,12 @@ class thread_safe_singleton:
     _instances = {}
     session_lock = Lock()
 
-    def __new__(cls, *args, **kwargs):
+    def __call__(cls, *args, **kwargs):
         with cls.session_lock:
             if cls not in cls._instances:
-                cls._instances[cls] = super(thread_safe_singleton, cls).__new__(cls, *args, **kwargs)
+                cls._instances[cls] = super(thread_safe_singleton, cls).__call__(
+                    cls, *args, **kwargs
+                )
             return cls._instances[cls]
 
 

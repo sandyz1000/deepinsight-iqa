@@ -54,16 +54,16 @@ class TFRecordDataset:
 
     @abstractmethod
     def write_tfrecord_dataset(
-            self, input_dir, csv_file, *args, tfrecord_path=None, **kwrags):
+            self, input_dir: str, csv_filename: str, *args, tfrecord_path=None, override=False, **kwrags):
         """ Convert raw input tfrecord dataset and save to locations
 
         :param input_dir: [description]
-        :type input_dir: [type]
-        :param csv_file: [description]
-        :type csv_file: [type]
+        :param csv_filename: CSV filename, where each row hold the reference, distorted and opinion score
         :param tfrecord_path: [description], defaults to None
         :type tfrecord_path: [type], optional
         """
+        if not override and os.path.exists(tfrecord_path):
+            raise RuntimeError("Cannot override data present in that location, set override=True to prepare tf-record")
 
     def load_tfrecord_dataset(self, file_pattern):
         assert os.path.exists(file_pattern), "TFRecord path doesn't exists"
@@ -152,18 +152,22 @@ class AVARecordDataset(TFRecordDataset):
         return img, mos, tags, challenge
 
     def write_tfrecord_dataset(
-        self, input_dir, csv_file,
+        self, input_dir, csv_filename,
         tfrecord_path=os.path.expanduser("~/tensorflow_dataset/ava/data.tf.records"),
         challenges_file='challenges.txt',
-        tags_file='tags.txt'
+        tags_file='tags.txt', **kwargs
     ):
-
-        lines = [line.strip().split() for line in tf.io.gfile.GFile(input_dir + os.sep + csv_file).readlines()]
+        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
+        lines = [line.strip().split() for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         challenges = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
-            os.path.join(input_dir, challenges_file), tf.int64, 0, tf.string, 1, delimiter=" "), -1)
+            os.path.join(input_dir, challenges_file), tf.int64, 0, tf.string, 1, delimiter=" "),
+            default_value=-1
+        )
 
         tags = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
-            os.path.join(input_dir, tags_file), tf.int64, 0, tf.string, 1, delimiter=" "), -1)
+            os.path.join(input_dir, tags_file), tf.int64, 0, tf.string, 1, delimiter=" "),
+            default_value=-1
+        )
 
         # TODO: Get folder from image_id and found in image_lists
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
@@ -239,10 +243,12 @@ class Tid2013RecordDataset(TFRecordDataset):
         return distorted_image, reference_image, x['mos']
 
     def write_tfrecord_dataset(
-        self, input_dir, csv_file,
-        tfrecord_path=os.path.expanduser("~/tensorflow_dataset/tid2013/data.tf.records")
+        self, input_dir, csv_filename,
+        tfrecord_path=os.path.expanduser("~/tensorflow_dataset/tid2013/data.tf.records",),
+        **kwargs
     ):
-        lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_file).readlines()]
+        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
+        lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
             for line in tqdm.tqdm(lines[1:]):
@@ -325,12 +331,14 @@ class CSIQRecordDataset(TFRecordDataset):
         return distorted_image, reference_image, x['distortion'], x['dmos'], x['dmos_std']
 
     def write_tfrecord_dataset(
-        self, input_dir, csv_file,
-        tfrecord_path=os.path.expanduser("~/tensorflow_dataset/csiq/data.tf.records")
+        self, input_dir, csv_filename,
+        tfrecord_path=os.path.expanduser("~/tensorflow_dataset/csiq/data.tf.records"),
+        **kwargs
     ):
+        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
         import re
 
-        lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_file).readlines()]
+        lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
             for line in tqdm.tqdm(lines[1:]):
@@ -345,7 +353,7 @@ class CSIQRecordDataset(TFRecordDataset):
                     reference_image = tf.io.decode_image(tf.io.read_file(ref_img_path))
                     example = self._serialize_feat(dst_idx, dst_type,
                                                    tf.io.serialize_tensor(distorted_image),
-                                                   tf.io.serialize_tensor(reference_image), 
+                                                   tf.io.serialize_tensor(reference_image),
                                                    dmos, dmos_std)
                     writer.write(example)
 
@@ -391,7 +399,7 @@ class LiveRecordDataset(TFRecordDataset):
         }))
         return example_proto.SerializeToString()
 
-    def _parse_tfrecord(self, tfrecord):
+    def _parse_tfrecord(self, tfrecord: tf.data.TFRecordDataset):
         """
         Parse single record and return image in PIL format
         :param tfrecord: TFRecord serialized string
@@ -405,10 +413,14 @@ class LiveRecordDataset(TFRecordDataset):
             x['dmos_realigned'], x['dmos_realigned_std']
 
     def write_tfrecord_dataset(
-        self, input_dir, csv_file,
-        tfrecord_path=os.path.expanduser("~/tensorflow_dataset/live/data.tf.records")
-    ):
-        lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_file).readlines()]
+        self,
+        input_dir: str,
+        csv_filename: str,
+        tfrecord_path: str = os.path.expanduser("~/tensorflow_dataset/live/data.tf.records"),
+        **kwargs
+    ) -> tf.data.TFRecordDataset:
+        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
+        lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
             for values in tqdm.tqdm(lines[1:]):

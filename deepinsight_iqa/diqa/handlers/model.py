@@ -5,26 +5,15 @@ class Diqa(object):
     def __init__(self, custom=False) -> None:
         self.custom = custom
         # Initialize objective model for training
-        self._objective_score_build()
-        self._subjective_score_build()
+        self.subjective_score_model = None
+        self.objective_score_model = None
+        self._build()
+    
+    def _build(self):
+        self.__build_obj_model()
+        self.__build_sub_model()
 
-    @property
-    def objective_score_model(self):
-        return self.__objective_error_map
-
-    @property
-    def subjective_score_model(self):
-        return self.__subjective_error_map
-
-    @objective_score_model.setter
-    def objective_score_model(self, model: tf.keras.Model):
-        self.__objective_error_map = model.fit_generator
-
-    @subjective_score_model.setter
-    def subjective_score_model(self, model: tf.keras.Model):
-        self.__subjective_error_map = model
-
-    def _objective_score_build(self):
+    def __build_obj_model(self):
         """
         #### Objective Error Model
         For the training phase, it is convenient to utilize the *tf.data* input pipelines to produce a 
@@ -54,9 +43,9 @@ class Diqa(object):
             f = tf.keras.layers.Conv2D(128, (1, 1), use_bias=False, activation='relu', name='bottleneck-3')(nn)
             g = tf.keras.layers.Conv2D(1, (1, 1), use_bias=False, activation='relu', name='bottleneck-4')(f)
 
-        self.__objective_error_map = tf.keras.Model(input_, g, name='objective_error_map')
+        self.objective_score_model = tf.keras.Model(input_, g, name='objective_error_map')
 
-    def _subjective_score_build(self):
+    def __build_sub_model(self):
         """
         #### Subjective Model
         *Note: It would be a good idea to use the Spearman’s rank-order correlation coefficient (SRCC) or 
@@ -78,14 +67,14 @@ class Diqa(object):
         """
 
         optimizer = tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
-        f = self.__objective_error_map.get_layer('bottleneck-3').output
+        f = self.objective_score_model.get_layer('bottleneck-3').output
         v = tf.keras.layers.GlobalAveragePooling2D(data_format='channels_last')(f)
         h = tf.keras.layers.Dense(128, activation='relu')(v)
         h = tf.keras.layers.Dense(128, activation='relu')(v)
         h = tf.keras.layers.Dense(1)(h)
-        self.__subjective_error_map = tf.keras.Model(self.__objective_error_map.input, h, name='subjective_error')
+        self.subjective_score_model = tf.keras.Model(self.objective_score_model.input, h, name='subjective_error')
 
-        self.__subjective_error_map.compile(
+        self.subjective_score_model.compile(
             optimizer=optimizer,
             loss=tf.losses.MeanSquaredError(),
             metrics=[tf.metrics.MeanSquaredError()]

@@ -3,6 +3,7 @@ import scipy.ndimage as ndi
 import math
 import sys
 import cv2
+import enum
 from skimage import exposure
 import tensorflow as tf
 try:
@@ -12,6 +13,18 @@ except ImportError:
     print("Error in loading augmentation, can't import imgaug."
           "Please make sure it is installed.")
     sys.exit(1)
+
+
+class AUGMENTATION_OPTIONS(enum.Enum):
+    all = 1
+    both = 2
+    default = 3
+    geometric = 4
+    non_geometric = 5
+
+    @classmethod
+    def _list_fields(cls):
+        return list(v.name for k, v in cls._value2member_map_.items())
 
 
 def image_aug_random(img):
@@ -664,7 +677,7 @@ def _try_n_times(fn, n, *args, **kargs):
 
 
 def augment_seg(img, seg, augmentation_name="default", num_tries=IMAGE_AUGMENTATION_NUM_TRIES):
-    assert augmentation_name in AUGMENTATION_OPTIONS, "Invalid augmentation option"
+    assert augmentation_name in AUGMENTATION_OPTIONS._list_fields(), "Invalid augmentation option"
     return _try_n_times(
         _augment_seg, num_tries,
         img, seg, augmentation_name=augmentation_name
@@ -672,7 +685,7 @@ def augment_seg(img, seg, augmentation_name="default", num_tries=IMAGE_AUGMENTAT
 
 
 def augment_img(img, augmentation_name="default", num_tries=IMAGE_AUGMENTATION_NUM_TRIES):
-    assert augmentation_name in AUGMENTATION_OPTIONS, "Invalid augmentation option"
+    assert augmentation_name in AUGMENTATION_OPTIONS._list_fields(), "Invalid augmentation option"
     return _try_n_times(
         _augment_img, num_tries,
         img, augmentation_name=augmentation_name
@@ -680,19 +693,8 @@ def augment_img(img, augmentation_name="default", num_tries=IMAGE_AUGMENTATION_N
 
 
 def augment_keypoints(img, keypoints, augmentation_name="default", num_tries=IMAGE_AUGMENTATION_NUM_TRIES):
-    assert augmentation_name in AUGMENTATION_OPTIONS, "Invalid augmentation option"
+    assert augmentation_name in AUGMENTATION_OPTIONS._list_fields(), "Invalid augmentation option"
     return _try_n_times(
         _augment_keypoints, num_tries,
         img, _augment_keypoints, augmentation_name=augmentation_name
     )
-
-
-class AUGMENTATION_TYPE:
-    all = "all"
-    both = "both"
-    default = "default"
-    geometric = "geometric"
-    non_geometric = 'non_geometric'
-
-
-AUGMENTATION_OPTIONS = ('all', 'both', 'default', 'geometric', 'non_geometric', )

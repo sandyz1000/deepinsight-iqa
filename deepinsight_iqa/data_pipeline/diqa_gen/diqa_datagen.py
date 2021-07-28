@@ -60,7 +60,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         return int(np.ceil(len(self.samples) / self.batch_size))  # number of batches per epoch
 
     @abstractmethod
-    def _parser(self, row: Dict):
+    def data_parser(self, row: Dict):
         """ Parse CSV ROW
         :param row: dataframe rows
         :type row: pd.Dataframe
@@ -101,7 +101,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         dist_images, ref_images, labels = [], [], []
         for i, sample in enumerate(batch_samples):
             # load and randomly augment image
-            i_d, i_r, label = self._parser(sample)
+            i_d, i_r, label = self.data_parser(sample)
             distorted_image = self.img_preprocessing(read_image(i_d, channels=len(self.target_size)))
             reference_image = self.img_preprocessing(read_image(i_r, channels=len(self.target_size)))
 
@@ -131,7 +131,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
 
 
 class LiveDataRowParser(DiqaDataGenerator):
-    def _parser(self, row: Dict):
+    def data_parser(self, row: Dict):
         """
         Function parse LIVE csv and return image features and label from csv row
 
@@ -151,7 +151,7 @@ class LiveDataRowParser(DiqaDataGenerator):
 
 
 class TID2013DataRowParser(DiqaDataGenerator):
-    def _parser(self, row: Dict):
+    def data_parser(self, row: Dict):
         """Generator function parse TID2013 csv and return image features and label from csv row
 
         Arguments:
@@ -173,7 +173,7 @@ class TID2013DataRowParser(DiqaDataGenerator):
 class CSIQDataRowParser(DiqaDataGenerator):
     IMG_EXT = "png"
 
-    def _parser(self, row: Dict):
+    def data_parser(self, row: Dict):
         """Generator function parse CSIQ csv and return image features and label from csv row
 
         Arguments:
@@ -236,7 +236,7 @@ class AVADataRowParser(DiqaDataGenerator):
         score_dist = self.normalize_labels(score_dist)
         return (score_dist * np.arange(1, 11)).sum()
 
-    def _parser(self, row: Dict):
+    def data_parser(self, row: Dict):
         """Parse AVA Dataset from the csv row
 
         :param row: [description]
@@ -254,7 +254,7 @@ class AVADataRowParser(DiqaDataGenerator):
         features, mos_scores, imgtags, challanges = [], [], [], []
         for i, sample in enumerate(batch_samples):
             # load and randomly augment image
-            img_path, mos, tags, challange = self._parser(sample)
+            img_path, mos, tags, challange = self.data_parser(sample)
             img = self.img_preprocessing(read_image(img_path, channels=len(self.target_size)))
             if img is None:
                 continue
@@ -279,14 +279,16 @@ class AVADataRowParser(DiqaDataGenerator):
         return features, labels
 
 
-def get_deepima_datagenerator(df: pd.DataFrame,
-                              img_dir: str,
-                              batch_size: int = 32,
-                              img_preprocessing: Callable = None,
-                              target_size: Tuple[int] = (256, 256),
-                              img_crop_dims: Tuple[int] = (224, 224),
-                              dataset_type: str = "tid2013",
-                              shuffle: bool = False, do_augment: bool = False):
+def get_deepiqa_datagenerator(
+    df: pd.DataFrame,
+    img_dir: str,
+    batch_size: int = 32,
+    img_preprocessing: Callable = None,
+    target_size: Tuple[int] = (256, 256),
+    img_crop_dims: Tuple[int] = (224, 224),
+    dataset_type: str = "tid2013",
+    shuffle: bool = False, do_augment: bool = False
+):
     """
     Generator that will generate image for AVA, TID2013 and CSIQ dataset
     """

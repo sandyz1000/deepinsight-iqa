@@ -1,8 +1,7 @@
 from typing import Optional
 from .utils.utils import (
     gradient, optimizer, calculate_subjective_score,
-    rescale, average_reliability_map, error_map, image_preprocess,
-    calculate_error_map
+    image_preprocess, calculate_error_map
 )
 import tensorflow as tf
 from ..data_pipeline.diqa_gen import diqa_datagen
@@ -20,7 +19,7 @@ logger.info(
 )
 
 
-class TrainDeepIQAWithTFDS:
+class TrainWithTFDS:
     def __init__(
         self,
         tfdataset: tf.data.TFRecordDataset,
@@ -29,7 +28,8 @@ class TrainDeepIQAWithTFDS:
         batch_size: int = 16,
         log_dir: Optional[str] = None,
         model_path: Optional[str] = None,
-        custom: bool = False
+        custom: bool = False,
+        **kwargs
     ):
         self.epochs = epochs
         self.extra_epochs = extra_epochs
@@ -38,6 +38,7 @@ class TrainDeepIQAWithTFDS:
         self.batch_size = batch_size
         self.diqa = Diqa(custom=custom)
         self.tfdataset = tfdataset
+        self.final_model = self.diqa.subjective_score_model
 
     def _training_objective_map(self, model, epochs=1, prefix='objective-model'):
         epoch_accuracy = tf.keras.metrics.MeanSquaredError()
@@ -76,7 +77,10 @@ class TrainDeepIQAWithTFDS:
         model.save(model_path)
         return history
 
-    def __call__(self, use_pretrained=False):
+    def load_weights(self) -> None:
+        self.final_model.load_weights(self.model_path)
+
+    def train(self, use_pretrained: bool = False):
         """
         Train objective Model
         ------------------------
@@ -90,25 +94,17 @@ class TrainDeepIQAWithTFDS:
         Train Subjective Model
         ------------------------
         """
-
+        self.load_weights() if use_pretrained else None
         # -------- OBJECTIVE TRAINING SESSION --------- #
         # Load pre-trained model for objectives error map
-        if not use_pretrained:
-            self._training_objective_map(self.diqa.objective_score_model, epochs=self.epochs,)
-        else:
-            self.diqa.objective_score_model.load_weights(self.model_path)
-
+        self._training_objective_map(self.diqa.objective_score_model, epochs=self.epochs,)
+        
         # -------- SUBJECTIVE TRAINING SESSION --------- #
         # Load pre-trained model for subjetive error map
-        if not use_pretrained:
-            self._train_subjective_map(self.diqa.subjective_score_model, epochs=self.extra_epochs,)
-        else:
-            self.diqa.subjective_score_model.load_weights(self.model_path)
-
-        return self.diqa.subjective_score_model
+        self._train_subjective_map(self.final_model, epochs=self.extra_epochs,)
 
 
-class TrainDeepIQAWithGenerator:
+class Train:
     _DATAGEN_MAPPING = {
         "tid2013": diqa_datagen.TID2013DataRowParser,
         "csiq": diqa_datagen.CSIQDataRowParser,
@@ -119,12 +115,14 @@ class TrainDeepIQAWithGenerator:
         self,
         image_dir: str,
         csv_path: str,
+        dataset_type: str, 
         model_path: Optional[str] = None,
         epochs: int = 5, batch_size: int = 16,
         multiprocessing_data_load: bool = False,
         extra_epochs: int = 1, num_workers_data_load: int = 1,
-        dataset_type: str = "tid2013", use_pretrained: bool = False,
+        use_pretrained: bool = False,
         log_dir: str = './logs', custom: bool = False,
+        **kwargs
     ):
         self.epochs = epochs
         self.model_path = model_path
@@ -140,6 +138,7 @@ class TrainDeepIQAWithGenerator:
         self.use_pretrained = use_pretrained
         self.data_gen_cls = self._DATAGEN_MAPPING[self.dataset_type]
         self.diqa = Diqa(custom=custom)
+        self.final_model = self.diqa.subjective_score_model
         # diqa.objective_score_model.summary()
         assert self.csv_path.split(".")[-1:] == 'csv', "Not a valid file extension"
 
@@ -161,7 +160,7 @@ class TrainDeepIQAWithGenerator:
             shuffle=False
         )
 
-    def __call__(self):
+    def train(self):
         """
         Similar to init_train but use Keras generator for training, we have more control over the API
         with image augmentation
@@ -179,7 +178,6 @@ class TrainDeepIQAWithGenerator:
 
         """
 
-        # initialize callbacks TensorBoardBatch and ModelCheckpoint
         tensorboard = TensorBoardBatch(log_dir=self.log_dir)
         model_checkpointer = ModelCheckpoint(filepath=self.model_path,
                                              monitor='val_loss',
@@ -192,9 +190,8 @@ class TrainDeepIQAWithGenerator:
         train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
         _optimizer = optimizer()
 
-        final_model = self.diqa.subjective_score_model()
         if self.use_pretrained:
-            final_model.load_weights(self.model_path)
+            self.final_model.load_weights(self.model_path)
 
         # ## ------------------------------
         # BEGIN EPOCH
@@ -222,7 +219,7 @@ class TrainDeepIQAWithGenerator:
         # Save the objective model
         self.diqa.objective_score_model.save(self.model_path)
 
-        final_model.fit_generator(
+        self.final_model.fit_generator(
             generator=subjective_datagen(self.train_generator),
             steps_per_epoch=100,
             validation_data=subjective_datagen(self.valid_generator),
@@ -236,5 +233,5 @@ class TrainDeepIQAWithGenerator:
             callbacks=[tensorboard, model_checkpointer]
         )
         # Save the subjective model
-        final_model.save(self.model_path)
+        self.final_model.save(self.model_path)
         K.clear_session()
