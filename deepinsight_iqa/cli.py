@@ -1,83 +1,89 @@
 import os
 import json
 import click
-import importlib
-_BASE_DIRNAME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+import sys
+from deepinsight_iqa.data_pipeline import (TFDatasetType, TFRecordDataset)
 
 
-def load_json(file_path):
-    with open(file_path, 'r') as f:
-        return json.load(f)
+@click.command()
+@click.option('-t', '--dataset_type', required=True,
+              show_choices=TFDatasetType._list_field(), help="Dataset Type, must be from the given options")
+@click.option('-i', '--image-dir', help='directory with image files', required=True)
+@click.option('-f', '--input-file', required=True, help='input csv/json file')
+def prepare_tf_record(dataset_type, image_dir, input_file):
+    kls = getattr(TFDatasetType, dataset_type, None)
+    assert kls is not None, "Invalid attribute for the datatype"
+    tfrecord: TFRecordDataset = kls()
+    tfrecord_path = tfrecord.write_tfrecord_dataset(image_dir, input_file)
+    return tfrecord_path
 
 
-def ensure_dir_exists(dir):
-    if not os.path.exists(dir):
-        os.makedirs(dir)
+@click.command()
+@click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
+@click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
+@click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found', default=os.getcwd())
+@click.option('-f', '--input-file', required=True, help='input csv/json file')
+@click.option('-i', '--image-dir', help='directory with image files', required=True)
+def predict(algo, conf_file, base_dir, input_file, image_dir):
+    # Script use to predict Image quality using Deep image quality assesement
+    if algo == "nima":
+        cfg = parse_config(base_dir, conf_file)
+        from deepinsight_iqa.nima import predict
 
+        return 0
+    elif algo == "diqa":
+        from deepinsight_iqa.diqa import diqa
 
-
-def executor(dstype=("tid2013", "live"), use_pretrained=False, use_augmentation=False,
-             batch_size=1, epochs=1):
-    """ 
-    Executor that will be used to initiate training of IQA dataset (TID2013, LIVE)
-
-    TODO: Add image augmentation and train objective_error_map model with keras Data generator
-    """
-    dstype = DatasetType.TID if dstype == "tid2013" else (DatasetType.LIV if dstype == "live" else None)
-    ds = DiqaDataset(dataset_type=dstype).fetch()
-
-    model = init_train(ds, model_path=None, custom=False, epochs=epochs, batch=batch_size,
-                       use_pretrained=use_pretrained, log_dir='logs')
-    # TODO: Use keras or tf v2.2.0 API for training
-
-    # objective_score = train_objective_model(
-    #     ds, model_path=OBJECTIVE_MODEL_PATH, use_pretrained=use_pretrained
-    # )
-
-    # subjective_score, history = train_subjective_score(
-    #     ds, objective_score, model_path=SUBJECTIVE_MODEL_PATH, use_pretrained=use_pretrained
-    # )
-
-    # TODO: Evaluate model (Write method for evaluation)
+        return 0
 
 
 def parse_config(job_dir, config_file):
-    ensure_dir_exists(os.path.join(job_dir, 'weights'))
-    ensure_dir_exists(os.paisth.join(job_dir, 'logs'))
-    config = load_json(config_file)
+    os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
+    os.makedirs(os.paisth.join(job_dir, 'logs'), exist_ok=True)
+    config = json.load(open(config_file, 'r'))
     return config
 
 
 @click.command()
 @click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
+@click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found', default=os.getcwd())
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
-def train(algo, conf_file, input_file, image_dir):
-    job_dir = _BASE_DIRNAME
-    cfg = parse_config(job_dir, conf_file)
-    train_mod = importlib.import_module(f".{algo}.train")
+def train(algo, conf_file, base_dir, input_file, image_dir):
+    cfg = parse_config(base_dir, conf_file)
     if algo == "nima":
-        samples_file = os.path.join(job_dir, input_file)
-        samples = load_json(samples_file)
-        train_mod.train(samples=samples, job_dir=job_dir, image_dir=image_dir, **cfg)
+        from deepinsight_iqa.nima import train
+        samples_file = os.path.join(base_dir, input_file)
+        samples = json.load(open(samples_file, 'r'))
+        trainer = train.Train(samples=samples, job_dir=base_dir, image_dir=image_dir, **cfg)
+        trainer.train()
         return 0
 
     elif algo == "diqa":
-        trainer = train_mod.TrainDeepIMAWithGenerator(image_dir, input_file, **cfg)
-        trainer.keras_init_train()
+        from deepinsight_iqa.diqa import train
+        dataset_type = cfg.pop('dataset_type')
+        trainer = train.Train(image_dir, input_file, dataset_type, **cfg)
+        trainer.train()
         return 0
 
 
 @click.command()
 @click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
+@click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found', default=os.getcwd())
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
-def evaluate(algo, conf_file, input_file, image_dir):
-    job_dir = _BASE_DIRNAME
-    cfg = parse_config(job_dir, conf_file)
-    evals_mod = importlib.import_module(f".{algo}.evals")
+def evaluate(algo, conf_file, base_dir, input_file, image_dir):
+    cfg = parse_config(base_dir, conf_file)
+    if algo == "nima":
+        from deepinsight_iqa.nima import evals
+
+        return 0
+    elif algo == "diqa":
+        from deepinsight_iqa.diqa import evals
+
+        return 0
 
 
 @click.group()
@@ -87,3 +93,7 @@ def main():
 
 main.add_command(train, "train")
 main.add_command(evaluate, "evaluate")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

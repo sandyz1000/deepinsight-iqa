@@ -1,78 +1,73 @@
 import sys
 import os
-print('__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
-    __file__, __name__, str(__package__)))
-    
 import tensorflow as tf
-from .model import Diqa
+from .handlers.model import Diqa
 from .utils import image_preprocess
 from time import perf_counter
 import logging
 import numpy as np
-import typing
+from typing import Union, Tuple
 import cv2
+import six
 logger = logging.getLogger(__name__)
-from .utils import thread_safe_memoize
+from deepinsight_iqa.common.utility import thread_safe_singleton
+
+print('__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
+    __file__, __name__, str(__package__)))
 
 
-@thread_safe_memoize
-def init_model(model_path):
-    try:
-        diqa = Diqa()
-        scoring_model = diqa.subjective_score_model
-        # model_path = os.path.join(BASE_DIR, 'weights/diqa/', SUBJECTIVE_MODEL_NAME)
-        scoring_model.load_weights(model_path)
-        return scoring_model
-    except Exception as e:
-        print("Unable to load DIQA model, check model path", str(e))
-        sys.exit(1)
+@six.add_metaclass(thread_safe_singleton)
+class Prediction:
+    def __init__(self, model_path):
+        try:
+            self.diqa = Diqa()
+            self.scoring_model = self.diqa.subjective_score_model
+            # model_path = os.path.join(BASE_DIR, 'weights/diqa/', SUBJECTIVE_MODEL_NAME)
+            self.scoring_model.load_weights(model_path)
+        except Exception as e:
+            print("Unable to load DIQA model, check model path", str(e))
+            sys.exit(1)
 
+    def get_image_score_pair(
+        self,
+        reference_image: Union[np.ndarray, tf.Tensor],
+        distorted_image: Union[np.ndarray, tf.Tensor]
+    ) -> Tuple[float, float]:
+        """
+        Return the score for the reference and distorted image, which can be later use for 
+        comparing with the target mos
+        Args:
+            reference_image ([type]): [description]
+            distorted_image ([type]): [description]
 
-def show_sample_prediction(scoring_model, reference_image, distorted_image):
-    """
-    Return the score for the reference and distorted image, which can be later use for 
-    comparing with the target mos
-    Args:
-        reference_image ([type]): [description]
-        distorted_image ([type]): [description]
+        Returns:
+            [type]: [description]
+        """
+        I_d = image_preprocess(distorted_image)
+        I_r = image_preprocess(reference_image)
+        dist_prediction = self.scoring_model.predict(I_d)[0][0]
+        ref_prediction = self.scoring_model.predict(I_r)[0][0]
+        return dist_prediction, ref_prediction
 
-    Returns:
-        [type]: [description]
-    """
-    I_d = image_preprocess(distorted_image)
-    I_r = image_preprocess(reference_image)
-    dist_prediction = scoring_model.predict(I_d)[0][0]
-    ref_prediction = scoring_model.predict(I_r)[0][0]
-    return dist_prediction, ref_prediction
+    def predict(self, img: Union[np.ndarray, str]) -> float:
+        assert img is not None, "Invalid path or image type"
+        if isinstance(img, str):
+            img = cv2.imread(img, cv2.IMREAD_UNCHANGED)
 
+        logger.info("Predicting the final score for IQA")
+        img = tf.convert_to_tensor(img, dtype=tf.float32)
 
-def predict(scoring_model, img: typing.Union[np.ndarray, str]) -> float:
-    assert img is not None, "Invalid path or image type"
-    if isinstance(img, str):
-        img = cv2.imread(img, cv2.IMREAD_UNCHANGED)
+        start = perf_counter()
+        I_d = image_preprocess(img)
+        end = perf_counter()
+        logger.debug(f"IQA preprocessing function image_preprocess took {end-start} seconds")
 
-    logger.info("Predicting the final score for IQA")
-    img = tf.convert_to_tensor(img, dtype=tf.float32)
+        start = perf_counter()
+        I_d = tf.tile(I_d, (1, 1, 1, 3))
+        prediction = self.scoring_model.predict(I_d)[0][0]
+        end = perf_counter()
 
-    start = perf_counter()
-    I_d = image_preprocess(img)
-    end = perf_counter()
-    logger.debug(f"IQA preprocessing function image_preprocess took {end-start} seconds")
+        logger.debug(f"Keras model took {end-start} seconds to predict the iqa score")
+        logger.info(f"final IQA score is {prediction}")
+        return prediction
 
-    start = perf_counter()
-    I_d = tf.tile(I_d, (1, 1, 1, 3))
-    prediction = scoring_model.predict(I_d)[0][0]
-    end = perf_counter()
-
-    logger.debug(f"Keras model took {end-start} seconds to predict the iqa score")
-    logger.info(f"final IQA score is {prediction}")
-    return prediction
-
-
-def main():
-    import argparse
-    parser = argparse.ArgumentParser("Script use to predict Image quality using Deep image quality assesement")
-    parser.add_argument("--img-path", required=True, help="Pass image location as n args")
-    args = vars(parser.parse_args())
-    args['scoring_model'] = init_model()
-    predict(**args)

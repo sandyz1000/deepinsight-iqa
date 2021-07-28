@@ -3,7 +3,13 @@ from setuptools import setup, find_packages
 
 setup(
     name="deepinsight-iqa",
-    scripts=["run"],
+    entry_points={
+        'console_script': [
+            "deepiqa_train=deepinsightiqa_iqa.cli:train",
+            "deepiqa_predict=deepinsightiqa_iqa.cli:predict",
+            "deepiqa_eval=deepinsightiqa_iqa.cli:evaluate",
+        ],
+    },
     version="0.1.0",
     description="Deep Learning based Image Quality Analysis",
     long_description=open("README.md").read(),
