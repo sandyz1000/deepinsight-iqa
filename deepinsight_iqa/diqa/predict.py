@@ -2,7 +2,7 @@ import sys
 import os
 import tensorflow as tf
 from .handlers.model import Diqa
-from .utils import image_preprocess
+from .utils.img_utils import image_preprocess
 from time import perf_counter
 import logging
 import numpy as np
@@ -21,6 +21,7 @@ class Prediction:
     def __init__(self, model_path):
         try:
             self.diqa = Diqa()
+            self.diqa._build()
             self.scoring_model = self.diqa.subjective_score_model
             # model_path = os.path.join(BASE_DIR, 'weights/diqa/', SUBJECTIVE_MODEL_NAME)
             self.scoring_model.load_weights(model_path)

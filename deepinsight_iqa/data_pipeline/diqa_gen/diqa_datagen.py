@@ -1,5 +1,5 @@
 import itertools
-from typing import Tuple, Callable, Dict
+from typing import Tuple, Callable, Dict, List
 import pandas as pd
 from deepinsight_iqa.common import image_aug
 import tensorflow as tf
@@ -9,6 +9,7 @@ from six import add_metaclass
 from abc import ABCMeta, abstractmethod
 import os
 IMG_EXT = "jpg"
+_AVA_OUTYPE = Tuple[Tuple[np.ndarray, str, str], float, List[int]]
 
 
 def load_image(img_file, target_size):
@@ -18,6 +19,16 @@ def load_image(img_file, target_size):
 def read_image(filename: str, **kwargs) -> tf.Tensor:
     stream = tf.io.read_file(filename)
     return tf.image.decode_image(stream, **kwargs)
+
+
+def _augmentation(img, rand_crop_dims=200):
+    sequential = [
+        (lambda img: image_aug.random_crop(img, [rand_crop_dims, rand_crop_dims])),
+        image_aug.random_horizontal_flip, image_aug.random_vertical_flip
+    ]
+    for _func in sequential:
+        img = _func(img)
+    return img
 
 
 class InvalidParserError(Exception):
@@ -42,16 +53,18 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         img_crop_dims: Tuple[int] = (224, 224),
         shuffle: bool = False,
         check_dir_availability=True,
+        do_augment=False,
     ):
+        self.do_augment = do_augment
         self.shuffle = shuffle
         df = df.sample(frac=1)
-        self.samples = df.to_records()
+        self.samples = df.to_numpy()
         self.img_dir = img_dir
         self.batch_size = batch_size
         self.img_preprocessing = img_preprocessing
         self.target_size = target_size  # dimensions that images get resized into when loaded
         self.img_crop_dims = img_crop_dims  # dimensions that images get randomly cropped to
-        self.__data_generator = self.__train_datagen__ if shuffle else self.__eval_datagen__
+        self.data_generator = self.__train_datagen__ if shuffle else self.__eval_datagen__
         if check_dir_availability:
             self._validate()  # All Image location not avaliable for the given dataset type
         self.on_epoch_end()  # call ensures that samples are shuffled in first epoch if shuffle is set to True
@@ -78,7 +91,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
     def __getitem__(self, index):
         batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]  # get batch indexes
         batch_samples = [self.samples[i] for i in batch_indexes]  # get batch samples
-        X, y = self.__data_generator(batch_samples)
+        X, y = self.data_generator(batch_samples)
         return X, y
 
     def on_epoch_end(self):
@@ -86,52 +99,56 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         if self.shuffle:
             np.random.shuffle(self.indexes)
 
-    def _augmentation(self, img, rand_crop_dims=200):
-        sequential = [
-            (lambda img: image_aug.random_crop(img, rand_crop_dims)),
-            image_aug.random_horizontal_flip, image_aug.random_vertical_flip
-        ]
-        # TODO: Apply augmentation based on paramenter supplied by the user
-        for _func in sequential:
-            img = _func(img)
-        return img
-
     def __train_datagen__(self, batch_samples):
 
-        dist_images, ref_images, labels = [], [], []
+        features, labels = [], []
         for i, sample in enumerate(batch_samples):
             # load and randomly augment image
-            i_d, i_r, label = self.data_parser(sample)
-            distorted_image = self.img_preprocessing(read_image(i_d, channels=len(self.target_size)))
-            reference_image = self.img_preprocessing(read_image(i_r, channels=len(self.target_size)))
+            i_d, i_r, label = self.data_parser(*sample)
+            if i_d is None or i_r is None:
+                continue
+            distorted_image, reference_image = (read_image(im, channels=3) for im in [i_d, i_r])
+            if self.img_preprocessing:
+                distorted_image, reference_image = [
+                    tf.squeeze(self.img_preprocessing(im), axis=0)
+                    for im in [distorted_image, reference_image]
+                ]
 
             if reference_image is None or distorted_image is None:
                 continue
 
-            reference_image = self._augmentation(reference_image)
-            distorted_image = self._augmentation(distorted_image)
+            if self.do_augment:
+                distorted_image, reference_image = [
+                    # tf.convert_to_tensor(image_aug.augment_img(im, augmentation_name='geometric'))
+                    _augmentation(im)
+                    for im in [distorted_image.numpy(), reference_image.numpy()]
+                ]
 
-            dist_images.append(distorted_image)
-            ref_images.append(reference_image)
+            features.append([distorted_image, reference_image])
             labels.append(label)
 
-        return dist_images, ref_images, labels
+        return features, labels
 
     def __eval_datagen__(self, batch_samples):
         """ initialize images and labels tensors for faster processing """
 
         features, labels = [], []
         for i, sample in enumerate(batch_samples):
-            i_d, i_r, label = self.data_parser(sample)
-            img = self.img_preprocessing(read_image(i_d, channels=len(self.target_size)))
-            features.append(img)
+            i_d, i_r, label = self.data_parser(*sample)
+            distorted_image, reference_image = (read_image(im, channels=3) for im in [i_d, i_r])
+            if self.img_preprocessing:
+                distorted_image, reference_image = [
+                    tf.squeeze(self.img_preprocessing(im), axis=0)
+                    for im in [distorted_image, reference_image]
+                ]
+            features.append([distorted_image, reference_image])
             labels.append(label)
 
         return features, labels
 
 
 class LiveDataRowParser(DiqaDataGenerator):
-    def data_parser(self, row: Dict):
+    def data_parser(self, *row: Tuple):
         """
         Function parse LIVE csv and return image features and label from csv row
 
@@ -139,8 +156,9 @@ class LiveDataRowParser(DiqaDataGenerator):
             df {[type]} -- Dataframes that has ref and distorted image and mos/dmos score
             img_dir {[type]} -- Directory that contains both image
         """
-        I_d, I_r, label = os.path.join(self.img_dir, row['distorted_path']), \
-            os.path.join(self.img_dir, row['reference_images']), row['dmos']
+        distortion, index, distorted_path, reference_path, dmos, dmos_realigned, dmos_realigned_std = row
+        I_d, I_r, label = os.path.join(self.img_dir, distorted_path), \
+            os.path.join(self.img_dir, reference_path), dmos
         return I_d, I_r, label
 
     def _validate(self) -> bool:
@@ -151,15 +169,16 @@ class LiveDataRowParser(DiqaDataGenerator):
 
 
 class TID2013DataRowParser(DiqaDataGenerator):
-    def data_parser(self, row: Dict):
+    def data_parser(self, *row: Tuple):
         """Generator function parse TID2013 csv and return image features and label from csv row
 
         Arguments:
             df {[type]} -- Dataframes that has ref and distorted image and mos/dmos score
             img_dir {[type]} -- Directory that contains both image
         """
-        I_d, I_r, label = os.path.join(self.img_dir, row['distorted_path']), \
-            os.path.join(self.img_dir, row['reference_images']), row['mos']
+        distorted_path, reference_path, mos = row
+        I_d, I_r, label = os.path.join(self.img_dir, distorted_path), \
+            os.path.join(self.img_dir, reference_path), mos
 
         return I_d, I_r, label
 
@@ -171,23 +190,32 @@ class TID2013DataRowParser(DiqaDataGenerator):
 
 
 class CSIQDataRowParser(DiqaDataGenerator):
-    IMG_EXT = "png"
+    dst_to_dir = {
+        "blur": "blur",
+        "awgn": "awgn",
+        "contrast": "contrast",
+        "noise": "fnoise",
+        "jpeg 2000": "jpeg2000",
+        "jpeg": "jpeg"
+    }
 
-    def data_parser(self, row: Dict):
+    def data_parser(self, *row: Tuple):
         """Generator function parse CSIQ csv and return image features and label from csv row
 
         Arguments:
             df {[type]} -- Dataframes that has ref and distorted image and mos/dmos score
             img_dir {[type]} -- Directory that contains both image
         """
-        I_d = os.path.join(
-            self.img_dir, "dst_imgs",
-            f"{row['image']}.{row['dst_type'].upper()}.{row['dst_idx']}.{self.IMG_EXT}"
-        )
+
+        image, dst_idx, dst_type, dst_lev, dmos_std, dmos = row
+
         I_r = os.path.join(
-            self.img_dir, "src_imgs", f"{row['image']}.{self.IMG_EXT}"
+            self.img_dir, "src_imgs", f"{image}.png"
         )
-        label = row['dmos']
+        I_d = os.path.join(
+            self.img_dir, 'dst_imgs', dst_type, f"{image}.{dst_type}.{dst_lev}.png"
+        )
+        label = dmos
         return I_d, I_r, label
 
     def _validate(self) -> bool:
@@ -209,23 +237,45 @@ class AVADataRowParser(DiqaDataGenerator):
             img_preprocessing: Callable = None,
             target_size: Tuple[int] = (256, 256),
             img_crop_dims: Tuple[int] = (224, 224),
-            shuffle: bool = False):
+            shuffle: bool = False,
+            do_augment=False,
+    ):
+        self.do_augment = do_augment
+        self.img_dir = img_dir
 
-        lines = tf.io.gfile.GFile(ava_txt).readlines().split()
-        # TODO: Fix below dataframe code
-
+        lines = [line.strip().split() for line in tf.io.gfile.GFile(img_dir + os.sep + ava_txt).readlines()]
         df = pd.DataFrame.from_records(lines)
-        self.challenges = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
-            os.path.join(img_dir, challenges_file), tf.int64, 0, tf.string, 1, delimiter=" "), -1)
 
-        self.tags = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
-            os.path.join(img_dir, tags_file), tf.int64, 0, tf.string, 1, delimiter=" "), -1)
+        _init = tf.lookup.TextFileInitializer(
+            filename=os.path.join(img_dir, challenges_file),
+            key_dtype=tf.string, key_index=0,
+            value_dtype=tf.string, value_index=1,
+            delimiter=" "
+        )
+        self.challenges = tf.lookup.StaticHashTable(_init, default_value="")
 
-        super(AVADataRowParser, self).__init__(df, img_dir,
-                                               batch_size=batch_size,
-                                               img_preprocessing=img_preprocessing,
-                                               target_size=target_size,
-                                               img_crop_dims=img_crop_dims, shuffle=shuffle)
+        _init = tf.lookup.TextFileInitializer(
+            filename=os.path.join(img_dir, tags_file),
+            key_dtype=tf.string, key_index=0,
+            value_dtype=tf.string, value_index=1,
+            delimiter=" "
+        )
+        self.tags = tf.lookup.StaticHashTable(_init, default_value="")
+
+        super(AVADataRowParser, self).__init__(
+            df, img_dir,
+            batch_size=batch_size,
+            img_preprocessing=img_preprocessing,
+            target_size=target_size,
+            img_crop_dims=img_crop_dims,
+            shuffle=shuffle, do_augment=do_augment
+        )
+
+    def __getitem__(self, index):
+        batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]  # get batch indexes
+        batch_samples = [self.samples[i] for i in batch_indexes]  # get batch samples
+        X, y, dist = self.data_generator(batch_samples)
+        return X, y, dist
 
     def normalize_labels(self, labels):
         labels_np = np.array(labels)
@@ -236,47 +286,59 @@ class AVADataRowParser(DiqaDataGenerator):
         score_dist = self.normalize_labels(score_dist)
         return (score_dist * np.arange(1, 11)).sum()
 
-    def data_parser(self, row: Dict):
+    def data_parser(self, *row: Tuple):
         """Parse AVA Dataset from the csv row
 
         :param row: [description]
         :type row: [type]
         """
-        return os.path.join(self.img_dir, row['image']), row['mos'], row['tags'], row["challenge"]
+        idx, image_path, mos, score_dist, linked_tags, challenge = (
+            int(row[0]),
+            f"{os.path.join(self.img_dir, 'images', row[1])}.jpg",
+            self.calc_mean_score([int(lab) for lab in row[2:12]]),
+            [int(lab) for lab in row[2:12]],
+            [self.tags.lookup(tf.cast(_id, tf.string)) for _id in row[12:14]],
+            self.challenges.lookup(tf.cast(row[14], tf.string))
+        )
+        return image_path, mos, score_dist, linked_tags, challenge
 
     def _validate(self) -> bool:
-        return all(os.path.exists(os.path.join(self.img_dir, p)) for p in [
-            "dataset/test", "dataset/train"
-        ])
+        return os.path.exists(os.path.join(self.img_dir, "images"))
 
-    def __train_datagen__(self, batch_samples):
-
-        features, mos_scores, imgtags, challanges = [], [], [], []
+    def __train_datagen__(self, batch_samples) -> _AVA_OUTYPE:
+        features, mos_scores, distributions = [], [], []
         for i, sample in enumerate(batch_samples):
             # load and randomly augment image
-            img_path, mos, tags, challange = self.data_parser(sample)
-            img = self.img_preprocessing(read_image(img_path, channels=len(self.target_size)))
+            image_path, mos, scoredis, linked_tags, challenge = self.data_parser(*sample)
+            img = read_image(image_path, channels=3)
             if img is None:
                 continue
-            img = self._augmentation(img)
+            if self.img_preprocessing:
+                img = self.img_preprocessing(img)
+            if self.do_augment:
+                img = _augmentation(img)
 
-            features.append(img)
+            features.append(
+                [img.numpy(), challenge.numpy(), tf.convert_to_tensor(linked_tags).numpy()]
+            )
             mos_scores.append(mos)
-            imgtags.append(tags)
-            challanges.append(challange)
+            distributions.append(scoredis)
 
-        return features, mos_scores, imgtags, challanges
+        return features, mos_scores, distributions
 
     def __eval_datagen__(self, batch_samples):
         """ initialize images and labels tensors for faster processing """
-        features, labels = [], []
+        features, mos_scores, distributions = [], []
         for i, sample in enumerate(batch_samples):
-            i_d, i_r, label = self.data_parser(sample)
-            img = self.img_preprocessing(read_image(i_d, channels=len(self.target_size)))
-            features.append(img)
-            labels.append(label)
+            image_path, mos, scoredis, linked_tags, challenge = self.data_parser(*sample)
+            img = read_image(image_path, channels=3)
+            if self.img_preprocessing:
+                img = self.img_preprocessing(img)
+            features.append((img, challenge, "|".join(linked_tags)))
+            mos_scores.append(mos)
+            distributions.append(scoredis)
 
-        return features, labels
+        return mos_scores, distributions
 
 
 def get_deepiqa_datagenerator(
@@ -292,17 +354,48 @@ def get_deepiqa_datagenerator(
     """
     Generator that will generate image for AVA, TID2013 and CSIQ dataset
     """
-    from functools import partial
 
-    def _tid2013_data_parser(row):
+    if shuffle:
+        df = df.sample(frac=1)
+    samples = df.to_numpy()
+    zipped = itertools.cycle(samples)
+    apply_aug = (lambda im: image_aug.augment_img(im, augmentation_name='geometric'))
+    while True:
+        X = []
+        Y = []
+
+        for _ in range(batch_size):
+            row = next(zipped)
+            # i_d, i_r, mos_score = data_parser(*row)
+            i_d, i_r, mos_score = row
+            im1, im2 = [
+                tf.squeeze(img_preprocessing(load_image(im, target_size)), axis=0)
+                for im in [i_d, i_r]
+            ]
+
+            if do_augment:
+                im1, im2 = [apply_aug(im) for im in [im1, im2]]
+
+            X.append((im1, im2))
+            Y.append(mos_score)
+
+        yield X, Y
+
+
+def combine_deepiqa_dataset(img_root_dir: str, all_csvs: List[str], output_csv: str):
+    """ Combine all csv to single csv file that can be used by the data-generator
+    """
+    # TODO: Fix this function
+    def _tid2013_data_parser(*row):
+        distorted_image, reference_image, mos = row
         return (
-            os.path.join(img_dir, row['distorted_image']),
-            os.path.join(img_dir, row['reference_image']),
-            row['mos']
+            os.path.join(img_dir, distorted_image),
+            os.path.join(img_dir, reference_image),
+            mos
         )
 
-    def _csiq_data_parser(row):
-        image, dst_idx, dst_type, dst_lev, dmos_std, dmos = row.keys()
+    def _csiq_data_parser(*row):
+        image, dst_idx, dst_type, dst_lev, dmos_std, dmos = row
         dst_type = "".join(dst_type.split())
         dst_img_path = os.path.join(
             img_dir, 'dst_imgs', dst_type, f"{image}.{dst_type}.{dst_lev}.png"
@@ -313,40 +406,18 @@ def get_deepiqa_datagenerator(
 
         return dst_img_path, ref_img_path, dmos
 
-    def _liveiqa_data_parser(row):
+    def _liveiqa_data_parser(*row: Tuple):
+        distortion, index, distorted_path, reference_path, dmos, dmos_realigned, dmos_realigned_std = row
         return (
-            os.path.join(img_dir, row['distorted_image']),
-            os.path.join(img_dir, row['reference_image']),
-            row['dmos']
+            os.path.join(img_dir, distorted_path),
+            os.path.join(img_dir, reference_path),
+            dmos
         )
 
     _FUNC_MAPPING = {
         "tid2013": _tid2013_data_parser,
         "csiq": _csiq_data_parser,
-        "liva": _liveiqa_data_parser
+        "live": _liveiqa_data_parser
     }
-
     assert dataset_type in _FUNC_MAPPING.keys(), "Invalid dataset type"
-    data_parser = partial(_FUNC_MAPPING[dataset_type])
-    if shuffle:
-        df = df.sample(frac=1)
-    samples = df.to_records()
-    zipped = itertools.cycle(samples)
-    apply_aug = (lambda im: image_aug.augment_img(im, augmentation_name='geometric'))
-    while True:
-        X = []
-        Y = []
-
-        for _ in range(batch_size):
-            row = next(zipped)
-            i_d, i_r, mos_score = data_parser(row)
-            im1 = img_preprocessing(load_image(i_d, target_size))
-            im2 = img_preprocessing(load_image(i_r, target_size))
-
-            if do_augment:
-                im1, im2 = [apply_aug(im) for im in [im1, im2]]
-
-            X.append((im1, im2))
-            Y.append(mos_score)
-
-        yield X, Y
+    data_parser = _FUNC_MAPPING[dataset_type]

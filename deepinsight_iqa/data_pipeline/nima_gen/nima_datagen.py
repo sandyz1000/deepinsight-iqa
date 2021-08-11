@@ -3,7 +3,7 @@ import numpy as np
 import os
 import random
 import itertools
-from pixar_common import image_aug
+from deepinsight_iqa.common import image_aug
 from tensorflow import keras
 from keras.applications.imagenet_utils import preprocess_input
 import cv2

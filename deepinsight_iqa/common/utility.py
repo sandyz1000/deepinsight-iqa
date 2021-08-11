@@ -69,7 +69,7 @@ def thread_safe_memoize(func):
     return memoizer
 
 
-class thread_safe_singleton:
+class thread_safe_singleton(type):
     _instances = {}
     session_lock = Lock()
 

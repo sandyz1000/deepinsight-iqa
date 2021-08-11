@@ -122,16 +122,18 @@ class AVARecordDataset(TFRecordDataset):
         "index": tf.io.FixedLenFeature((), tf.int64),
         "image": tf.io.FixedLenFeature((), tf.string),
         "mos": tf.io.FixedLenFeature((), tf.float32),
+        "score_dist": tf.io.VarLenFeature(tf.string),
         "tags": tf.io.VarLenFeature(tf.string),
         "challenge": tf.io.FixedLenFeature((), tf.string),
     }
 
-    def _serialize_feat(self, index, image, mos, tags, challenge, *args, **kwargs):
+    def _serialize_feat(self, index, image, mos, score_dist, challenge, tags, *args, **kwargs):
         """ Create a Features message using tf.train.Example. """
         example_proto = tf.train.Example(features=tf.train.Features(feature={
             "index": _int64_feature(index),
             "image": _bytes_feature(image),
             "mos": _float_feature(mos),
+            "score_dist": _bytes_feature(score_dist),
             "tags": _bytes_feature(tags),
             "challenge": _bytes_feature(challenge),
         }))
@@ -146,10 +148,11 @@ class AVARecordDataset(TFRecordDataset):
         """
         x = tf.io.parse_single_example(tfrecord, self.IMAGE_FEATURE_MAP)
         img = tf.io.parse_tensor(x['image'], out_type=tf.uint8)
-        tags = x['tags'].values
+        tags = tf.io.parse_tensor(x['tags'], out_type=tf.string)
+        score_dist = tf.io.parse_tensor(x['score_dist'], out_type=tf.int32)
         mos = x['mos']
         challenge = x['challenge']
-        return img, mos, tags, challenge
+        return img, mos, score_dist, tags, challenge
 
     def write_tfrecord_dataset(
         self, input_dir, csv_filename,
@@ -157,34 +160,50 @@ class AVARecordDataset(TFRecordDataset):
         challenges_file='challenges.txt',
         tags_file='tags.txt', **kwargs
     ):
-        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
+        super().write_tfrecord_dataset(input_dir, csv_filename, tfrecord_path=tfrecord_path, **kwargs)
         lines = [line.strip().split() for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
-        challenges = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
-            os.path.join(input_dir, challenges_file), tf.int64, 0, tf.string, 1, delimiter=" "),
-            default_value=-1
+        _init = tf.lookup.TextFileInitializer(
+            filename=os.path.join(input_dir, challenges_file),
+            key_dtype=tf.string, key_index=0,
+            value_dtype=tf.string, value_index=1,
+            delimiter=" "
         )
+        challenges = tf.lookup.StaticHashTable(_init, default_value="")
 
-        tags = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
-            os.path.join(input_dir, tags_file), tf.int64, 0, tf.string, 1, delimiter=" "),
-            default_value=-1
+        _init = tf.lookup.TextFileInitializer(
+            filename=os.path.join(input_dir, tags_file),
+            key_dtype=tf.string, key_index=0,
+            value_dtype=tf.string, value_index=1,
+            delimiter=" "
         )
+        tags = tf.lookup.StaticHashTable(_init, default_value="")
 
         # TODO: Get folder from image_id and found in image_lists
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
             for line in tqdm.tqdm(lines):
-                index, image, mos, linked_tags, challenge = (
-                    line[0], os.path.join(input_dir, line[1]), self.calc_mean_score(line[2:12]),
-                    [tags.lookup(_id) for _id in line[12:14]],
-                    challenges.lookup(line[14]))
-                im_arr = tf.io.decode_image(tf.io.read_file(image))
+                index, image_path, mos, score_dist, linked_tags, challenge = (
+                    int(line[0]),
+                    f"{os.path.join(input_dir, 'images', line[1])}.jpg",
+                    self.calc_mean_score([int(lab) for lab in line[2:12]]),
+                    [int(lab) for lab in line[2:12]],
+                    [tags.lookup(tf.cast(_id, tf.string)) for _id in line[12:14]],
+                    challenges.lookup(tf.cast(line[14], tf.string))
+                )
+                try:
+                    im_arr = tf.io.decode_image(tf.io.read_file(image_path))
+                except (tf.errors.InvalidArgumentError, tf.errors.NotFoundError):
+                    continue
                 # im_arr = tf.keras.preprocessing.image.img_to_array(tf.keras.preprocessing.image.load_img(image))
                 # im_arr = tf.keras.preprocessing.image.random_zoom(im_arr, (0.5, 0.5),
                 #                                                      row_axis=0,
                 #                                                      col_axis=1,
                 #                                                      channel_axis=2)
-                img_bytes = tf.io.serialize_tensor(im_arr)
-                example = self._serialize_feat(index, img_bytes, mos, challenge, tf.io.serialize_tensor(linked_tags))
+                example = self._serialize_feat(
+                    index, tf.io.serialize_tensor(im_arr),
+                    mos, tf.io.serialize_tensor(score_dist),
+                    challenge, tf.io.serialize_tensor(linked_tags)
+                )
                 writer.write(example)
 
         return tfrecord_path
@@ -247,7 +266,7 @@ class Tid2013RecordDataset(TFRecordDataset):
         tfrecord_path=os.path.expanduser("~/tensorflow_dataset/tid2013/data.tf.records",),
         **kwargs
     ):
-        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
+        super().write_tfrecord_dataset(input_dir, csv_filename, tfrecord_path=tfrecord_path, **kwargs)
         lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
@@ -335,7 +354,7 @@ class CSIQRecordDataset(TFRecordDataset):
         tfrecord_path=os.path.expanduser("~/tensorflow_dataset/csiq/data.tf.records"),
         **kwargs
     ):
-        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
+        super().write_tfrecord_dataset(input_dir, csv_filename, tfrecord_path=tfrecord_path, **kwargs)
         import re
 
         lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
@@ -419,7 +438,7 @@ class LiveRecordDataset(TFRecordDataset):
         tfrecord_path: str = os.path.expanduser("~/tensorflow_dataset/live/data.tf.records"),
         **kwargs
     ) -> tf.data.TFRecordDataset:
-        super().write_tfrecord_dataset(tfrecord_path=tfrecord_path, *kwargs)
+        super().write_tfrecord_dataset(input_dir, csv_filename, tfrecord_path=tfrecord_path, **kwargs)
         lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
