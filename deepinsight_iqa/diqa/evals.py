@@ -26,6 +26,7 @@ class Evaluation:
         """
 
         self.diqa = Diqa(custom=custom)
+        self.diqa._build()
         assert csv_path.split(".")[-1:] == 'csv', "Not a valid file extension"
 
         df = pd.read_csv(csv_path)

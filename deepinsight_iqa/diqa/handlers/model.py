@@ -1,17 +1,35 @@
 import tensorflow as tf
+import tensorflow.keras.layers as KL
+import tensorflow.keras.applications as KA
 
 
 class Diqa(object):
-    def __init__(self, custom=False) -> None:
+    def __init__(self, base_model_name, custom=False) -> None:
         self.custom = custom
+        self.base_model_name = base_model_name
         # Initialize objective model for training
         self.subjective_score_model = None
         self.objective_score_model = None
-        self._build()
-    
+
     def _build(self):
         self.__build_obj_model()
         self.__build_sub_model()
+
+    def _get_base_module(self):
+        if self.base_model_name == 'InceptionV3':
+            model = KA.InceptionV3(input_shape=(None, None, 3),
+                                   include_top=False, weights="imagenet")
+        elif self.base_model_name == 'MobileNet':
+            model = KA.MobileNetV2(input_shape=(None, None, 3),
+                                   include_top=False, weights="imagenet")
+
+        elif self.base_model_name == "InceptionResNetV2":
+            model = KA.InceptionResNetV2(input_shape=(None, None, 3),
+                                         include_top=False, weights="imagenet")
+        else:
+            raise AttributeError("Invalid base_model name, should be a valid model from keras")
+
+        return model
 
     def __build_obj_model(self):
         """
@@ -21,27 +39,24 @@ class Diqa(object):
         """
         if self.custom:
             input_ = tf.keras.Input(shape=(None, None, 1), batch_size=1, name='original_image')
-            f = tf.keras.layers.Conv2D(48, (3, 3), name='Conv1', activation='relu', padding='same')(input_)
-            f = tf.keras.layers.Conv2D(48, (3, 3), name='Conv2', activation='relu', padding='same', strides=(2, 2))(f)
-            f = tf.keras.layers.Conv2D(64, (3, 3), name='Conv3', activation='relu', padding='same')(f)
-            f = tf.keras.layers.Conv2D(64, (3, 3), name='Conv4', activation='relu', padding='same', strides=(2, 2))(f)
-            f = tf.keras.layers.Conv2D(64, (3, 3), name='Conv5', activation='relu', padding='same')(f)
-            f = tf.keras.layers.Conv2D(64, (3, 3), name='Conv6', activation='relu', padding='same', strides=(2, 2))(f)
-            f = tf.keras.layers.Conv2D(128, (3, 3), name='Conv7', activation='relu', padding='same')(f)
-            f = tf.keras.layers.Conv2D(128, (3, 3), name='Conv8', activation='relu', padding='same', strides=(2, 2))(f)
-            g = tf.keras.layers.Conv2D(1, (1, 1), name='Conv9', padding='same', activation='linear')(f)
+            f = KL.Conv2D(48, (3, 3), name='Conv1', activation='relu', padding='same')(input_)
+            f = KL.Conv2D(48, (3, 3), name='Conv2', activation='relu', padding='same', strides=(2, 2))(f)
+            f = KL.Conv2D(64, (3, 3), name='Conv3', activation='relu', padding='same')(f)
+            f = KL.Conv2D(64, (3, 3), name='Conv4', activation='relu', padding='same', strides=(2, 2))(f)
+            f = KL.Conv2D(64, (3, 3), name='Conv5', activation='relu', padding='same')(f)
+            f = KL.Conv2D(64, (3, 3), name='Conv6', activation='relu', padding='same', strides=(2, 2))(f)
+            f = KL.Conv2D(128, (3, 3), name='Conv7', activation='relu', padding='same')(f)
+            f = KL.Conv2D(128, (3, 3), name='Conv8', activation='relu', padding='same', strides=(2, 2))(f)
+            g = KL.Conv2D(1, (1, 1), name='Conv9', padding='same', activation='linear')(f)
         else:
-            model = tf.keras.applications.MobileNetV2(input_shape=(None, None, 3),
-                                                      include_top=False,
-                                                      weights="imagenet")
-
+            model = self._get_base_module()
             input_ = model.input
             model.trainable = False
-            nn = tf.keras.layers.Conv2D(512, (1, 1), use_bias=False, activation='relu',
-                                        name='bottleneck-1')(model.output)
-            nn = tf.keras.layers.Conv2D(256, (1, 1), use_bias=False, activation='relu', name='bottleneck-2')(nn)
-            f = tf.keras.layers.Conv2D(128, (1, 1), use_bias=False, activation='relu', name='bottleneck-3')(nn)
-            g = tf.keras.layers.Conv2D(1, (1, 1), use_bias=False, activation='relu', name='bottleneck-4')(f)
+            nn = KL.Conv2D(512, (1, 1), use_bias=False, activation='relu',
+                           name='bottleneck-1')(model.output)
+            nn = KL.Conv2D(256, (1, 1), use_bias=False, activation='relu', name='bottleneck-2')(nn)
+            f = KL.Conv2D(128, (1, 1), use_bias=False, activation='relu', name='bottleneck-3')(nn)
+            g = KL.Conv2D(1, (1, 1), use_bias=False, activation='relu', name='bottleneck-4')(f)
 
         self.objective_score_model = tf.keras.Model(input_, g, name='objective_error_map')
 
@@ -68,10 +83,10 @@ class Diqa(object):
 
         optimizer = tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
         f = self.objective_score_model.get_layer('bottleneck-3').output
-        v = tf.keras.layers.GlobalAveragePooling2D(data_format='channels_last')(f)
-        h = tf.keras.layers.Dense(128, activation='relu')(v)
-        h = tf.keras.layers.Dense(128, activation='relu')(v)
-        h = tf.keras.layers.Dense(1)(h)
+        v = KL.GlobalAveragePooling2D(data_format='channels_last')(f)
+        h = KL.Dense(128, activation='relu')(v)
+        h = KL.Dense(128, activation='relu')(v)
+        h = KL.Dense(1)(h)
         self.subjective_score_model = tf.keras.Model(self.objective_score_model.input, h, name='subjective_error')
 
         self.subjective_score_model.compile(

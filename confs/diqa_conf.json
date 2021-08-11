@@ -1,12 +1,13 @@
 {
-	"model_dir": "MobileNet",
-	"model_filename": "",
+	"model_dir": "weights/diqa",
+	"base_model_name": "MobileNet",
+	"model_filename": "diqa-weights-epoch-5.h5",
 	"dataset_type": "tid2013",
 	"existing_weights": null,
 	"use_augmentation": false,
 	"batch_size": 8,
 	"epochs_train_dense": 5,
-	"epochs_train_all": 9,
+	"epochs": 9,
 	"learning_rate_dense": 0.001,
 	"decay_dense": 0,
 	"learning_rate_all": 0.00003,
@@ -14,5 +15,6 @@
 	"l2_reg": null,
 	"dropout_rate": 0.75,
 	"multiprocessing_data_load": false,
-	"num_workers_data_load": 1
+	"num_workers_data_load": 1,
+	"custom": false
   }

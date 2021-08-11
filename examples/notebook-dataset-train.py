@@ -11,12 +11,14 @@
 
 # %%
 import os
+import sys
 import json
 import tensorflow as tf
 import cv2
 from scipy.ndimage import variance, mean, maximum
 from skimage.color import rgb2gray
 import matplotlib.pyplot as plt
+sys.path.append(os.path.realpath(os.pardir))
 from deepinsight_iqa.data_pipeline.dataset import (
     Tid2013RecordDataset, CSIQRecordDataset, AVARecordDataset,
     LiveRecordDataset
@@ -27,10 +29,11 @@ tfrecord_outdir = os.path.expanduser("~/tensorflow_dataset")
 # ### TID 2013 Dataset
 # %%
 tfrecord = Tid2013RecordDataset()
+# %%
 tfrecord_path = tfrecord.write_tfrecord_dataset(os.path.join(DATA_DIR, "tid2013"), "mos.csv")
 
 # %%
-tid2013_ds = tfrecord.load_tfrecord_dataset(os.path.join(tfrecord_outdir, "/tid2013/data.tf.records"))
+tid2013_ds = tfrecord.load_tfrecord_dataset(os.path.join(tfrecord_outdir, "tid2013/data.tf.records"))
 # %%
 x = next(iter(tid2013_ds.take(1)))
 
@@ -38,15 +41,17 @@ x = next(iter(tid2013_ds.take(1)))
 # ### CSIQ Dataset
 # %%
 tfrecord = CSIQRecordDataset()
+# %%
 tfrecord_path = tfrecord.write_tfrecord_dataset(os.path.join(DATA_DIR, "CSIQ"), "csiq.csv")
 # %%
-csiq_ds = tfrecord.load_tfrecord_dataset(os.path.join(tfrecord_outdir, "/csiq/data.tf.records"))
+csiq_ds = tfrecord.load_tfrecord_dataset(os.path.join(tfrecord_outdir, "csiq/data.tf.records"))
 dist_img, ref_img, distortion, dmos, dmos_std = next(iter(csiq_ds.take(1)))
 
 # %% [markdown]
 # ### Live Dataset
 # %%
 tfrecord = LiveRecordDataset()
+# %%
 tfrecord_path = tfrecord.write_tfrecord_dataset(os.path.join(DATA_DIR, "live"), "dmos.csv")
 
 # %%
@@ -55,46 +60,65 @@ distorted_image, reference_image, distortion, dmos, dmos_realigned, dmos_realign
 
 # %% [markdown]
 # ### AVA Dataset
+from deepinsight_iqa.data_pipeline.dataset import AVARecordDataset
 tfrecord = AVARecordDataset()
-tfrecord_path = tfrecord.write_tfrecord_dataset(os.path.join(DATA_DIR, "ava"), "AVA.txt")
+# %%
+tfrecord_path = tfrecord.write_tfrecord_dataset(
+    os.path.join(DATA_DIR, "ava"), "AVA.txt")
 # %%
 ava_ds = tfrecord.load_tfrecord_dataset(os.path.join(tfrecord_outdir, "ava/data.tf.records"))
-distorted_image, reference_image, distortion, dmos, dmos_realigned, dmos_realigned_std = next(iter(ava_ds.take(1)))
+image, mos, score_dist, linked_tags, challenge = next(iter(ava_ds.take(1)))
 
 # %%
 from deepinsight_iqa.diqa.train import TrainWithTFDS, Train
-
+from deepinsight_iqa.diqa.utils.img_utils import image_preprocess
+# %%
 
 def parse_config(job_dir, config_file):
     os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
-    os.makedirs(os.paisth.join(job_dir, 'logs'), exist_ok=True)
+    os.makedirs(os.path.join(job_dir, 'logs'), exist_ok=True)
     config = json.load(open(config_file, 'r'))
     return config
 
 
 # %%
+job_dir = os.path.realpath(os.path.pardir)
+config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_conf.json"))
+cfg = parse_config(job_dir, config_file)
+dataset_type = cfg.pop('dataset_type')
+# %%
 # ## TRAIN TID2013
 image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/tid2013", "mos.csv"
-cfg = parse_config()
 dataset_type = "tid2013"
-trainer = Train(image_dir, input_file, dataset_type, **cfg)
-trainer.final_model.summary()
+trainer = Train(image_dir, input_file, dataset_type, do_augment=True, **cfg)
+# trainer.final_model.summary()
+# %%
+features, labels = next(iter(trainer.train_generator))
 # %%
 trainer.train()
 # %%
-image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/CSIQ", "csiq.DMOS.xlsx"
-cfg = parse_config()
-dataset_type = cfg.pop('dataset_type')
-trainer = Train(image_dir, input_file, dataset_type, **cfg)
-trainer.final_model.summary()
+dataset_type = "live"
+image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/live", "dmos.csv"
+trainer = Train(image_dir, input_file, dataset_type, do_augment=True, **cfg)
+# trainer.final_model.summary()
+# %%
+features, labels = next(iter(trainer.train_generator))
 # %%
 trainer.train()
 # %%
-image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/CSIQ", "csiq.DMOS.xlsx"
-cfg = parse_config()
-dataset_type = cfg.pop('dataset_type')
-trainer = TrainWithTFDS(csiq_ds, **cfg)
+image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/CSIQ", "csiq.csv"
+dataset_type = "csiq"
+trainer = Train(image_dir, input_file, dataset_type, do_augment=False, **cfg)
+# %%
+features, labels = next(iter(trainer.train_generator))
+# %%
 trainer.train()
+# %%
+from deepinsight_iqa.data_pipeline.diqa_gen.diqa_datagen import AVADataRowParser
+image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/ava", "AVA.txt"
+gen = AVADataRowParser(input_file, image_dir, shuffle=True)
+# %%
+features, mos_scores, distributions = next(iter(gen))
 
 
 # %% [markdown]
