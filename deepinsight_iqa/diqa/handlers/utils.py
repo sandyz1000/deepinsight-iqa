@@ -1,5 +1,5 @@
 import tensorflow as tf
-from ..utils.img_utils import image_preprocess, rescale
+from ..utils.img_utils import rescale
 
 
 def error_map(reference: tf.Tensor, distorted: tf.Tensor, p: float = 0.2) -> tf.Tensor:
@@ -91,10 +91,6 @@ def loss(model_, x, y_true, r):
     return tf.reduce_mean(tf.square((y_true - y_pred) * r))
 
 
-def optimizer():
-    return tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
-
-
 def gradient(model, x, y_true, r):
     with tf.GradientTape() as tape:
         loss_value = loss(model, x, y_true, r)
@@ -108,7 +104,7 @@ def gradient(model, x, y_true, r):
 #     e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
 #     return (I_d, e_gt, r)
 
-def calculate_error_map(I_d: tf.Tensor, I_r: tf.Tensor, SCALING_FACTOR: float = 1. / 32):
-    r = rescale(average_reliability_map(I_d, 0.2), SCALING_FACTOR)
-    e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
+def calculate_error_map(I_d: tf.Tensor, I_r: tf.Tensor, scaling_factor: float = 1. / 32):
+    r = rescale(average_reliability_map(I_d, 0.2), scaling_factor)
+    e_gt = rescale(error_map(I_r, I_d, 0.2), scaling_factor)
     return (I_d, e_gt, r)

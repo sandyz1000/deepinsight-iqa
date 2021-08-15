@@ -6,39 +6,27 @@ from keras.callbacks import TensorBoard
 class TensorBoardBatch(TensorBoard):
     def __init__(self, *args, **kwargs):
         super(TensorBoardBatch, self).__init__(*args, **kwargs)
-        self.tf = __import__('tensorflow')
         self.train_loss = args['metrics'].get('loss', None)
-        self.epoch_accuracy = args['metrics'].get('accuracy', None)
+        self.train_accuracy = args['metrics'].get('accuracy', None)
+        self.train_loss = args['metrics'].get('val_loss', None)
+        self.train_accuracy = args['metrics'].get('val_accuracy', None)
         self.batch_counter = 0
-
-    def on_batch_end(self, batch, logs=None):
-        self.batch_counter += 1
-        logs = logs or {}
-        logs['lr'] = K.get_value(self.model.optimizer.lr)
-        for name, value in logs.items():
-            if name in ['batch', 'size']:
-                continue
-            summary = self.tf.Summary()
-            summary_value = summary.value.add()
-            summary_value.simple_value = value.item()
-            summary_value.tag = name
-            self.writer.add_summary(summary, self.batch_counter)
-
-        self.writer.flush()
 
     def on_epoch_end(self, epoch, logs=None):
         logs = logs or {}
         logs['lr'] = K.get_value(self.model.optimizer.lr)
+        with self._train_writer.as_default():
+            tf.summary.scalar('loss', self.train_loss.result(), step=epoch)
+            tf.summary.scalar('accuracy', self.train_accuracy.result(), step=epoch)
+
+        with self._val_writer.as_default():
+            tf.summary.scalar('loss', self.valid_loss.result(), step=epoch)
+            tf.summary.scalar('accuracy', self.valid_accuracy.result(), step=epoch)
+
         for name, value in logs.items():
             if name in ['batch', 'size']:
                 continue
-            summary = self.tf.Summary()
-            summary_value = summary.value.add()
-            summary_value.simple_value = value.item()
-            summary_value.tag = name
-            summary.scalar('loss', self.train_loss.result(), step=epoch)
-            summary.scalar('accuracy', self.epoch_accuracy.result(), step=epoch)
-            self.writer.add_summary(summary, epoch)
+            with self._train_writer.as_default():
+                tf.summary.scalar(name, value, step=epoch)
 
-        self.writer.flush()
-
+        self._train_writer.flush()

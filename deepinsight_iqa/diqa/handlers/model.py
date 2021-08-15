@@ -5,15 +5,28 @@ import tensorflow.keras.applications as KA
 
 class Diqa(object):
     def __init__(self, base_model_name, custom=False) -> None:
-        self.custom = custom
-        self.base_model_name = base_model_name
         # Initialize objective model for training
-        self.subjective_score_model = None
-        self.objective_score_model = None
+        self.objective_net = ObjectiveNetwork(base_model_name, custom=custom)
+        self.subjective_net = SubjectiveNetwork()
+        self.subjective = None
+        self.objective = None
 
     def _build(self):
-        self.__build_obj_model()
-        self.__build_sub_model()
+        self.objective = self.objective_net().model
+        self.subjective = self.subjective_net(
+            self.objective.input, 
+            self.objective.get_layer('bottleneck').output
+        ).model
+
+
+class ObjectiveNetwork:
+    def __init__(self, base_model_name, custom=False) -> None:
+        self.model = None
+        self.base_model_name = base_model_name
+        self.custom = custom
+        self.loss = (lambda name: tf.keras.metrics.Mean(name, dtype=tf.float32))
+        self.accuracy = (lambda name: tf.keras.metrics.MeanSquaredError(name))
+        self.optimizer = tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
 
     def _get_base_module(self):
         if self.base_model_name == 'InceptionV3':
@@ -26,18 +39,7 @@ class Diqa(object):
         elif self.base_model_name == "InceptionResNetV2":
             model = KA.InceptionResNetV2(input_shape=(None, None, 3),
                                          include_top=False, weights="imagenet")
-        else:
-            raise AttributeError("Invalid base_model name, should be a valid model from keras")
-
-        return model
-
-    def __build_obj_model(self):
-        """
-        #### Objective Error Model
-        For the training phase, it is convenient to utilize the *tf.data* input pipelines to produce a 
-        much cleaner and readable code. The only requirement is to create the function to apply to the input.
-        """
-        if self.custom:
+        elif self.base_model_name == "custom":
             input_ = tf.keras.Input(shape=(None, None, 1), batch_size=1, name='original_image')
             f = KL.Conv2D(48, (3, 3), name='Conv1', activation='relu', padding='same')(input_)
             f = KL.Conv2D(48, (3, 3), name='Conv2', activation='relu', padding='same', strides=(2, 2))(f)
@@ -46,21 +48,40 @@ class Diqa(object):
             f = KL.Conv2D(64, (3, 3), name='Conv5', activation='relu', padding='same')(f)
             f = KL.Conv2D(64, (3, 3), name='Conv6', activation='relu', padding='same', strides=(2, 2))(f)
             f = KL.Conv2D(128, (3, 3), name='Conv7', activation='relu', padding='same')(f)
-            f = KL.Conv2D(128, (3, 3), name='Conv8', activation='relu', padding='same', strides=(2, 2))(f)
-            g = KL.Conv2D(1, (1, 1), name='Conv9', padding='same', activation='linear')(f)
+            f = KL.Conv2D(128, (3, 3), name='bottleneck', activation='relu', padding='same', strides=(2, 2))(f)
+            model = tf.keras.Model(input_, f, name="diqa_custom")
         else:
-            model = self._get_base_module()
-            input_ = model.input
-            model.trainable = False
-            nn = KL.Conv2D(512, (1, 1), use_bias=False, activation='relu',
-                           name='bottleneck-1')(model.output)
-            nn = KL.Conv2D(256, (1, 1), use_bias=False, activation='relu', name='bottleneck-2')(nn)
-            f = KL.Conv2D(128, (1, 1), use_bias=False, activation='relu', name='bottleneck-3')(nn)
-            g = KL.Conv2D(1, (1, 1), use_bias=False, activation='relu', name='bottleneck-4')(f)
+            raise AttributeError("Invalid base_model name, should be a valid model from keras")
 
-        self.objective_score_model = tf.keras.Model(input_, g, name='objective_error_map')
+        return model
 
-    def __build_sub_model(self):
+    def __call__(self):
+        """
+        #### Objective Error Model
+        For the training phase, it is convenient to utilize the *tf.data* input pipelines to produce a 
+        much cleaner and readable code. The only requirement is to create the function to apply to the input.
+        """
+        model = self._get_base_module()
+        input_ = model.input
+        model.trainable = False
+        
+        if self.custom:
+            g = KL.Conv2D(1, (1, 1), name='final', padding='same', activation='linear')(model.output)
+        else:
+            nn = KL.Conv2D(512, (1, 1), use_bias=False, activation='relu')(model.output)
+            nn = KL.Conv2D(256, (1, 1), use_bias=False, activation='relu')(nn)
+            f = KL.Conv2D(128, (1, 1), use_bias=False, activation='relu', name='bottleneck')(nn)
+            g = KL.Conv2D(1, (1, 1), name='final', use_bias=False, activation='relu')(f)
+
+        self.model = tf.keras.Model(input_, g, name='objective_error_map')
+        return self
+
+
+class SubjectiveNetwork:
+    def __init__(self) -> None:
+        self.model = None
+
+    def __call__(self, _input, bottleneck):
         """
         #### Subjective Model
         *Note: It would be a good idea to use the Spearman’s rank-order correlation coefficient (SRCC) or 
@@ -82,15 +103,15 @@ class Diqa(object):
         """
 
         optimizer = tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
-        f = self.objective_score_model.get_layer('bottleneck-3').output
-        v = KL.GlobalAveragePooling2D(data_format='channels_last')(f)
+        v = KL.GlobalAveragePooling2D(data_format='channels_last')(bottleneck)
         h = KL.Dense(128, activation='relu')(v)
         h = KL.Dense(128, activation='relu')(v)
         h = KL.Dense(1)(h)
-        self.subjective_score_model = tf.keras.Model(self.objective_score_model.input, h, name='subjective_error')
+        self.model = tf.keras.Model(_input, h, name='subjective_error_map')
 
-        self.subjective_score_model.compile(
+        self.model.compile(
             optimizer=optimizer,
             loss=tf.losses.MeanSquaredError(),
             metrics=[tf.metrics.MeanSquaredError()]
         )
+        return self
