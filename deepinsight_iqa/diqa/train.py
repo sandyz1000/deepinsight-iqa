@@ -1,14 +1,14 @@
-from typing import Optional, Callable
-from .handlers.utils import gradient, optimizer, calculate_error_map
+from typing import Optional, Callable, Iterator, Union
+from .handlers.utils import gradient, calculate_error_map, loss
 import os
 import tensorflow as tf
-from ..data_pipeline.diqa_gen import diqa_datagen
 from tensorflow.keras.callbacks import ModelCheckpoint
 import tensorflow.keras.backend as K
-import pandas as pd
 from .handlers.model import Diqa
 from .utils.callbacks import TensorBoardBatch
 import logging
+from abc import abstractmethod, ABCMeta
+from six import add_metaclass
 logger = logging.getLogger()
 
 logger.info(
@@ -23,76 +23,71 @@ def generate_random_name(batch_size, epochs):
     return model_filename
 
 
-class TrainWithTFDS:
+class TrainerStep:
+    def __init__(self, model, name, is_training: bool = False, optimizer=None, **kwds) -> None:
+        self.model = model
+        self.loss = tf.keras.metrics.Mean(f'{name}_loss', dtype=tf.float32)
+        self.accuracy = tf.keras.metrics.MeanSquaredError(f'{name}_accuracy')
+        self.is_training = is_training
+        self.optimizer = optimizer
+        self.scaling_factor = kwds['scaling_factor']
+
+    def __call__(self, I_d, I_r):
+        I_d, e_gt, r = calculate_error_map(I_d, I_r, scaling_factor=self.scaling_factor)
+        if self.is_training:
+            loss_value, gradients = gradient(self.model, I_d, e_gt, r)
+            self.optimizer.apply_gradients(zip(gradients, self.model.trainable_weights))
+        else:
+            loss_value = loss(self.model, I_d, e_gt, r)
+        self.loss(loss_value)
+        self.accuracy(e_gt, self.model(I_d))
+
+
+@add_metaclass(ABCMeta)
+class Trainer:
     def __init__(
         self,
-        tfdataset: tf.data.TFRecordDataset,
-        image_preprocess: Optional[Callable] = None, 
-        epochs: int = 5,
-        extra_epochs: int = 1,
-        batch_size: int = 16,
-        log_dir: Optional[str] = None,
         model_dir: Optional[str] = None,
         model_filename: Optional[str] = None,
+        log_dir: str = './logs',
+        epochs: int = 5, batch_size: int = 16,
+        multiprocessing_data_load: bool = False,
+        extra_epochs: int = 1, num_workers_data_load: int = 1,
+        use_pretrained: bool = False,
         custom: bool = False,
+        verbose: bool = False,
         **kwargs
     ):
+        """
+        Similar to init_train but use Keras generator for training, we have more control over the API
+        with image augmentation
+
+        1. Image augmentation such as (crop, shift and rotation) will useful to check the quality
+            is added to get more variance in training output
+        2. Split of dataset into training and test subsets
+        3. Evaluation metric on the test set
+        4. Larger Batch size can be used for training
+
+        """
         base_model_name = kwargs.pop('base_model_name')
-        self.image_preprocess = image_preprocess
         self.epochs = epochs
-        self.extra_epochs = extra_epochs
-        self.log_dir = log_dir
         if not model_filename:
             model_filename = generate_random_name(batch_size, epochs)
-        self.model_path = os.path.join(model_dir, model_filename)
+        self.model_filename = model_filename
+        self.model_dir = model_dir
+        self.log_dir = log_dir
+        self.multiprocessing_data_load = multiprocessing_data_load
+        self.extra_epochs = extra_epochs
         self.batch_size = batch_size
+        self.num_workers_data_load = num_workers_data_load
+        self.use_pretrained = use_pretrained
+        self.steps_per_epoch = kwargs['steps_per_epoch']
+        self.validation_steps = kwargs['validation_steps']
+        self.kwargs = kwargs
         self.diqa = Diqa(base_model_name, custom=custom)
         self.diqa._build()
-        self.tfdataset = tfdataset
-        self.final_model = self.diqa.subjective_score_model
 
-    def _training_objective_map(self, model, epochs=1, prefix='objective-model'):
-        epoch_accuracy = tf.keras.metrics.MeanSquaredError()
-        train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
-        tensorboard = TensorBoardBatch(self.log_dir, metrics=[{'loss': train_loss}, {'accuracy': epoch_accuracy}])
-        tensorboard.set_model(model)
-        opt = optimizer()
-        train = self.tfdataset.map(calculate_error_map)
-
-        for epoch in range(epochs):
-            step = 0
-            for I_d, e_gt, r in train:
-                loss_value, gradients = gradient(model, I_d, e_gt, r)
-                opt.apply_gradients(zip(gradients, model.trainable_weights))
-                train_loss(loss_value)
-                epoch_accuracy(e_gt, model(I_d))
-
-                if step % 100 == 0:
-                    print('step %s: mean loss = %s' % (step, epoch_accuracy.result()))
-                step += 1
-            # Invoke tensorflow callback here
-            tensorboard.on_epoch_end(epoch)
-
-        # Save model to destination path
-        model_path = f"{prefix}-{self.model_path}"
-        model.save(model_path)
-        return model
-
-    def _train_subjective_map(self, model, epochs=1, prefix='subjective-model'):
-        # TODO: Fix error here
-        train = self.tfdataset.map(lambda img: (self.image_preprocess(img)))
-        tensorboard = TensorBoardBatch(self.log_dir)
-        tensorboard.set_model(model)
-
-        history = model.fit(train, epochs=epochs, callbacks=[tensorboard])
-        model_path = f"{prefix}-{self.model_path}"
-        model.save(model_path)
-        return history
-
-    def load_weights(self) -> None:
-        self.final_model.load_weights(self.model_path)
-
-    def train(self, use_pretrained: bool = False):
+    def train(self, training_method='all', use_pretrained: bool = False):
         """
         Train objective Model
         ------------------------
@@ -106,157 +101,256 @@ class TrainWithTFDS:
         Train Subjective Model
         ------------------------
         """
-        self.load_weights() if use_pretrained else None
-        # -------- OBJECTIVE TRAINING SESSION --------- #
-        # Load pre-trained model for objectives error map
-        self._training_objective_map(self.diqa.objective_score_model, epochs=self.epochs,)
-        
-        # -------- SUBJECTIVE TRAINING SESSION --------- #
-        # Load pre-trained model for subjetive error map
-        self._train_subjective_map(self.final_model, epochs=self.extra_epochs,)
+        if use_pretrained and os.path.exists(self.model_filename):
+            self.diqa.subjective.load_weights(self.model_filename)
+
+        elif training_method == "subjective":
+            self.train_subjective(self.diqa.subjective)
+        elif training_method == "objective":
+            self.train_objective(self.diqa.objective)
+        else:
+            # -------- OBJECTIVE TRAINING SESSION --------- #
+            # Load pre-trained model for objectives error map
+            self.train_objective(self.diqa.objective)
+
+            # -------- SUBJECTIVE TRAINING SESSION --------- #
+            # Load pre-trained model for subjetive error map
+            self.train_subjective(self.diqa.subjective)
+
+    @abstractmethod
+    def train_subjective(self, model: tf.keras.Model, prefix='subjective-model'):
+        raise NotImplemented
+
+    @abstractmethod
+    def train_objective(self, model: tf.keras.Model, prefix='objective-model'):
+        raise NotImplemented
 
 
-class Train:
-    _DATAGEN_MAPPING = {
-        "tid2013": diqa_datagen.TID2013DataRowParser,
-        "csiq": diqa_datagen.CSIQDataRowParser,
-        "live": diqa_datagen.LiveDataRowParser
-    }
+class TrainWithTFDS(Trainer):
+    def __init__(
+        self,
+        train_iter: Union[Iterator, tf.data.Dataset],
+        valid_iter: Union[Iterator, tf.data.Dataset] = None,
+        image_preprocess: Optional[Callable] = None,
+        epochs: int = 5,
+        extra_epochs: int = 1,
+        batch_size: int = 16,
+        log_dir: Optional[str] = 'logs',
+        model_dir: Optional[str] = None,
+        model_filename: Optional[str] = None,
+        use_pretrained: bool = False,
+        custom: bool = False,
+        verbose: bool = False,
+        **kwargs
+    ):
+        super().__init__(
+            model_dir=model_dir,
+            model_filename=model_filename,
+            epochs=epochs,
+            batch_size=batch_size,
+            extra_epochs=extra_epochs,
+            use_pretrained=use_pretrained,
+            log_dir=log_dir, custom=custom, verbose=verbose,
+            **kwargs
+        )
+        self.image_preprocess = image_preprocess
+        self.tfdataset_train = train_iter
+        self.tfdataset_valid = valid_iter
+        self.final_model = self.diqa.subjective
+
+    def train_objective(self, model: tf.keras.Model, prefix='objective-model'):
+        train_step = TrainerStep(
+            self.warmup_model, "train", True,
+            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
+            scaling_factor=self.kwargs['scaling_factor']
+        )
+        valid_step = TrainerStep(
+            self.warmup_model, "valid", False,
+            scaling_factor=self.kwargs['scaling_factor']
+        )
+        tensorboard = TensorBoardBatch(
+            self.log_dir,
+            metrics=[
+                {'loss': train_step.loss}, {'accuracy': train_step.accuracy},
+                {'val_loss': valid_step.loss}, {'val_accuracy': valid_step.accuracy}
+            ]
+        )
+        tensorboard.set_model(model)
+        train_summary_writer = tf.summary.create_file_writer(self.log_dir)
+        test_summary_writer = tf.summary.create_file_writer(self.log_dir)
+        for epoch in range(self.epochs):
+            for I_d, I_r, mos in self.tfdataset_train:
+                train_step(I_d, I_r)
+            with train_summary_writer.as_default():
+                tf.summary.scalar('loss', train_step.loss.result(), step=epoch)
+                tf.summary.scalar('accuracy', train_step.accuracy.result(), step=epoch)
+
+            for I_d, I_r, mos in self.tfdataset_valid:
+                valid_step(I_d, I_r)
+            with test_summary_writer.as_default():
+                tf.summary.scalar('loss', valid_step.loss.result(), step=epoch)
+                tf.summary.scalar('accuracy', valid_step.accuracy.result(), step=epoch)
+
+            # Invoke tensorflow callback here
+            tensorboard.on_epoch_end(epoch)
+            template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
+            print(template.format(
+                epoch + 1,
+                train_step.loss.result(),
+                train_step.accuracy.result() * 100,
+                valid_step.loss.result(),
+                valid_step.accuracy.result() * 100)
+            )
+
+        # Save model to destination path
+        model_path = f"{prefix}-{self.model_filename}"
+        model.save(model_path)
+        return model
+
+    def train_subjective(self, model: tf.keras.Model, prefix='subjective-model'):
+        # TODO: Fix error here
+        from tensorflow.keras.callbacks import TensorBoard
+        train = self.tfdataset.map(lambda img: (self.image_preprocess(img)))
+        tensorboard = TensorBoard(self.log_dir)
+        tensorboard.set_model(model)
+
+        history = model.fit(train, epochs=self.epochs + self.extra_epochs, callbacks=[tensorboard])
+        model_path = f"{prefix}-{self.model_filename}"
+        model.save(model_path)
+        return history
+
+
+class Train(Trainer):
 
     def __init__(
         self,
-        image_dir: str,
-        csv_path: str,
-        dataset_type: str, 
-        image_preprocess: Optional[Callable] = None, 
+        train_iter: Union[Iterator, tf.data.Dataset],
+        valid_iter: Union[Iterator, tf.data.Dataset] = None,
         model_dir: Optional[str] = None,
         model_filename: Optional[str] = None,
         epochs: int = 5, batch_size: int = 16,
         multiprocessing_data_load: bool = False,
         extra_epochs: int = 1, num_workers_data_load: int = 1,
         use_pretrained: bool = False,
-        log_dir: str = './logs', 
+        log_dir: str = 'logs',
         custom: bool = False,
+        verbose: bool = False,
         **kwargs
     ):
-        assert dataset_type in self._DATAGEN_MAPPING.keys(), "Invalid dataset_type, unable to use generator"
-        base_model_name = kwargs.pop('base_model_name')
-        do_augment = kwargs['do_augment']
-        self.csv_path = os.path.join(image_dir, csv_path)
-        assert os.path.splitext(self.csv_path)[-1] == '.csv' and os.path.exists(self.csv_path), \
-            "Not a valid file extension"
-        self.epochs = epochs
-        if not model_filename:
-            model_filename = generate_random_name(batch_size, epochs)
-        self.model_path = os.path.join(model_dir, model_filename)
-        self.log_dir = log_dir
-        self.multiprocessing_data_load = multiprocessing_data_load
-        self.extra_epochs = extra_epochs
-        self.img_format = 'jpg'
-        self.image_dir = image_dir
-        self.dataset_type = dataset_type
-        self.batch_size = batch_size
-        self.num_workers_data_load = num_workers_data_load
-        self.use_pretrained = use_pretrained
-        self.data_gen_cls = self._DATAGEN_MAPPING[self.dataset_type]
-        self.diqa = Diqa(base_model_name, custom=custom)
-        self.diqa._build()
-        self.final_model = self.diqa.subjective_score_model
-        # diqa.objective_score_model.summary()
+        super().__init__(
+            model_dir=model_dir,
+            model_filename=model_filename,
+            epochs=epochs,
+            batch_size=batch_size,
+            extra_epochs=extra_epochs,
+            multiprocessing_data_load=multiprocessing_data_load,
+            num_workers_data_load=num_workers_data_load,
+            use_pretrained=use_pretrained,
+            log_dir=log_dir, custom=custom, verbose=verbose,
+            **kwargs
+        )
+        self.train_generator = train_iter
+        self.valid_generator = valid_iter
 
-        df = pd.read_csv(self.csv_path).sample(frac=1)
-        samples_train, samples_test = df.iloc[:int(len(df) * 0.7), ], df.iloc[int(len(df) * 0.7):, ]
+    def train_objective(self, model: tf.keras.Model, prefix='objective-model'):
 
-        self.train_generator = self.data_gen_cls(
-            samples_train,
-            self.image_dir,
-            self.batch_size,
-            img_preprocessing=image_preprocess,
-            do_augment=do_augment,
-            shuffle=True
+        train_step = TrainerStep(
+            model, "train", True,
+            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
+            scaling_factor=self.kwargs['scaling_factor']
+        )
+        valid_step = TrainerStep(
+            model, "valid", False,
+            scaling_factor=self.kwargs['scaling_factor']
         )
 
-        self.valid_generator = self.data_gen_cls(
-            samples_test,
-            self.image_dir,
-            self.batch_size,
-            img_preprocessing=image_preprocess,
-            do_augment=do_augment,
-            shuffle=False
-        )
+        # tensorboard = TensorBoardBatch(
+        #     log_dir=self.log_dir,
+        #     metrics=[
+        #         {'loss': train_step.loss}, {'accuracy': train_step.accuracy},
+        #         {'val_loss': valid_step.loss}, {'val_accuracy': valid_step.accuracy}
+        #     ]
+        # )
 
-    def train(self):
-        """
-        Similar to init_train but use Keras generator for training, we have more control over the API
-        with image augmentation
-
-        Train objective Model
-        ------------------------
-        1. Image augmentation such as (crop, shift and rotation) will useful to check the quality
-            is added to get more variance in training output
-        2. Split of dataset into training and test subsets
-        3. Evaluation metric on the test set
-        4. Larger Batch size can be used for training
-
-        Train Subjective Model
-        ------------------------
-
-        """
-
-        tensorboard = TensorBoardBatch(log_dir=self.log_dir)
-        model_checkpointer = ModelCheckpoint(filepath=self.model_path,
-                                             monitor='val_loss',
-                                             verbose=1,
-                                             save_best_only=True,
-                                             save_weights_only=True)
-
-        # Define Metrics
-        epoch_accuracy = tf.keras.metrics.MeanSquaredError()
-        train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
-        _optimizer = optimizer()
-
-        if self.use_pretrained:
-            self.final_model.load_weights(self.model_path)
+        if self.use_pretrained and os.path.exists(self.model_filename):
+            self.final_model.load_weights(self.model_filename)
 
         # ## ------------------------------
         # BEGIN EPOCH
         # ## ------------------------------
-
-        def subjective_datagen(datagen):
-            for I_d, I_r, mos in iter(datagen):
-                yield I_d, mos
+        train_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'train'))
+        test_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'valid'))
 
         for epoch in range(self.epochs):
-            step = 0
-            for I_d, I_r, mos in iter(self.train_generator):
-                I_d, e_gt, r = calculate_error_map(I_d, I_r)
-                loss_value, gradients = gradient(self.diqa.objective_score_model, I_d, e_gt, r)
-                _optimizer.apply_gradients(zip(gradients, self.diqa.objective_score_model.trainable_weights))
-                train_loss(loss_value)
-                epoch_accuracy(e_gt, self.diqa.objective_score_model(I_d))
+            train_step_cnt = 0
+            for I_d, I_r, mos in self.train_generator:
+                train_step(I_d, I_r)
+                train_step_cnt += 1
+                if train_step_cnt >= self.steps_per_epoch:
+                    break
+            with train_summary_writer.as_default():
+                tf.summary.scalar('loss', train_step.loss.result(), step=epoch)
+                tf.summary.scalar('accuracy', train_step.accuracy.result(), step=epoch)
 
-                if step % 100 == 0:
-                    print('step %s: mean loss = %s' % (step, epoch_accuracy.result()))
-            step += 1
-            # Invoke tensorflow callback here
-            tensorboard.on_epoch_end(epoch)
+            if self.valid_generator:
+                valid_step_cnt = 0
+                for I_d, I_r, mos in self.valid_generator:
+                    valid_step(I_d, I_r)
+                    valid_step_cnt += 1
+                    if valid_step_cnt >= self.validation_steps:
+                        break
+                with test_summary_writer.as_default():
+                    tf.summary.scalar('loss', valid_step.loss.result(), step=epoch)
+                    tf.summary.scalar('accuracy', valid_step.accuracy.result(), step=epoch)
+
+            # tensorboard.on_epoch_end(epoch)
+            if self.valid_generator:
+                template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
+                logging.info(template.format(
+                    epoch + 1,
+                    train_step.loss.result(),
+                    train_step.accuracy.result() * 100,
+                    valid_step.loss.result(),
+                    valid_step.accuracy.result() * 100)
+                )
+            else:
+                template = 'Epoch {}, Loss: {}, Accuracy: {}'
+                logging.info(template.format(
+                    epoch + 1,
+                    train_step.loss.result(),
+                    train_step.accuracy.result() * 100,)
+                )
 
         # Save the objective model
-        self.diqa.objective_score_model.save(self.model_path)
+        model_path = os.path.join(self.model_dir, f"{prefix}-{self.model_filename}")
+        model.save(model_path)
 
-        self.final_model.fit_generator(
-            generator=subjective_datagen(self.train_generator),
-            steps_per_epoch=100,
+    def train_subjective(self, model: tf.keras.Model, prefix='subjective-model'):
+        model_checkpointer = ModelCheckpoint(
+            filepath=self.model_dir,
+            monitor='val_loss',
+            verbose=1,
+            save_best_only=True,
+            save_weights_only=True
+        )
+
+        subjective_datagen = (
+            lambda datagen: ((im, mos) for im, _, mos in datagen)
+        )
+
+        model.fit(
+            subjective_datagen(self.train_generator),
+            steps_per_epoch=self.steps_per_epoch,
             validation_data=subjective_datagen(self.valid_generator),
-            validation_steps=100,
+            validation_steps=self.validation_steps,
             epochs=self.epochs + self.extra_epochs,
             initial_epoch=self.epochs,
             verbose=1,
             use_multiprocessing=self.multiprocessing_data_load,
             workers=self.num_workers_data_load,
-            max_q_size=30,
-            callbacks=[tensorboard, model_checkpointer]
+            callbacks=[model_checkpointer]
         )
         # Save the subjective model
-        self.final_model.save(self.model_path)
+        model_path = os.path.join(self.model_dir, f"{prefix}-{self.model_filename}")
+        model.save(model_path)
         K.clear_session()

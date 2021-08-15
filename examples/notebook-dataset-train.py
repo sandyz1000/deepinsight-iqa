@@ -23,6 +23,11 @@ from deepinsight_iqa.data_pipeline.dataset import (
     Tid2013RecordDataset, CSIQRecordDataset, AVARecordDataset,
     LiveRecordDataset
 )
+from deepinsight_iqa.diqa.train import TrainWithTFDS, Train, get_datagen, get_combine_datagen
+from deepinsight_iqa.diqa.utils.img_utils import image_preprocess
+
+from deepinsight_iqa.data_pipeline.diqa_gen.diqa_datagen import combine_deepiqa_dataset
+from deepinsight_iqa.diqa.train import get_combine_datagen
 DATA_DIR = "/Users/sdey/Documents/dataset/image-quality-assesement"
 tfrecord_outdir = os.path.expanduser("~/tensorflow_dataset")
 # %% [markdown]
@@ -70,9 +75,7 @@ ava_ds = tfrecord.load_tfrecord_dataset(os.path.join(tfrecord_outdir, "ava/data.
 image, mos, score_dist, linked_tags, challenge = next(iter(ava_ds.take(1)))
 
 # %%
-from deepinsight_iqa.diqa.train import TrainWithTFDS, Train
-from deepinsight_iqa.diqa.utils.img_utils import image_preprocess
-# %%
+
 
 def parse_config(job_dir, config_file):
     os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
@@ -84,35 +87,42 @@ def parse_config(job_dir, config_file):
 # %%
 job_dir = os.path.realpath(os.path.pardir)
 config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_conf.json"))
+
 cfg = parse_config(job_dir, config_file)
 dataset_type = cfg.pop('dataset_type')
 # %%
 # ## TRAIN TID2013
 image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/tid2013", "mos.csv"
 dataset_type = "tid2013"
-trainer = Train(image_dir, input_file, dataset_type, do_augment=True, **cfg)
+train_generator, valid_generator = get_datagen(image_dir, input_file, dataset_type, do_augment=cfg['use_augmentation'],)
+# trainer = Train(train_generator, valid_generator, **cfg)
 # trainer.final_model.summary()
 # %%
-features, labels = next(iter(trainer.train_generator))
-# %%
-trainer.train()
+# for features, labels in train_generator:
+#     I_d, I_r = zip(*features)
+
+features, labels = next(iter(train_generator))
+I_d, I_r = zip(*features)
+
 # %%
 dataset_type = "live"
 image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/live", "dmos.csv"
-trainer = Train(image_dir, input_file, dataset_type, do_augment=True, **cfg)
-# trainer.final_model.summary()
+train_generator, valid_generator = get_datagen(image_dir, input_file, dataset_type, do_augment=cfg['use_augmentation'],)
+
 # %%
-features, labels = next(iter(trainer.train_generator))
-# %%
-trainer.train()
+features, labels = next(iter(train_generator))
+
 # %%
 image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/CSIQ", "csiq.csv"
 dataset_type = "csiq"
-trainer = Train(image_dir, input_file, dataset_type, do_augment=False, **cfg)
+train_generator, valid_generator = get_datagen(
+    image_dir, input_file, dataset_type,
+    do_augment=cfg['use_augmentation'],
+    input_size=cfg['input_size']
+)
+# trainer = Train(train_generator, valid_generator, **cfg)
 # %%
-features, labels = next(iter(trainer.train_generator))
-# %%
-trainer.train()
+features, labels = next(iter(train_generator))
 # %%
 from deepinsight_iqa.data_pipeline.diqa_gen.diqa_datagen import AVADataRowParser
 image_dir, input_file = "/Users/sdey/Documents/dataset/image-quality-assesement/ava", "AVA.txt"
@@ -120,7 +130,80 @@ gen = AVADataRowParser(input_file, image_dir, shuffle=True)
 # %%
 features, mos_scores, distributions = next(iter(gen))
 
+# %%
 
+image_dir, csv_path = "/Users/sdey/Documents/dataset/image-quality-assesement", "combine.csv"
+csvspathmap = {
+    "live": "live/dmos.csv",
+    "tid2013": "tid2013/mos.csv",
+    "csiq": "CSIQ/csiq.csv"
+}
+# %%
+# combine_deepiqa_dataset(image_dir, csvspathmap, csv_path)
+# %%
+cfg = parse_config(job_dir, config_file)
+train, valid = get_combine_datagen(
+    image_dir, csv_path, do_augment=cfg['use_augmentation'],
+    image_preprocess=image_preprocess, input_size=cfg['input_size']
+)
+# %%
+I_d, I_r, mos = next(train)
+# %%
+dist, refe = features[0]
+dist = tf.convert_to_tensor(dist)
+# %%
+dist, ref = features[0]
+plt.subplot(121), plt.imshow(dist)
+plt.subplot(122), plt.imshow(ref)
+
+# %%
+subjective_datagen = (lambda datagen: (
+    ([dist for dist, ref in features], labels) for features, lables in datagen
+))
+# %%
+features, labels = next(subjective_datagen(train))
+# %%
+# TODO:
+# - Break on validation step
+# - Verify all network size and scaling factor for image -- Done
+# - Complete training
+# %%
+cfg = parse_config(job_dir, config_file)
+train, valid = get_combine_datagen(
+    image_dir, csv_path, do_augment=cfg['use_augmentation'],
+    image_preprocess=image_preprocess, input_size=cfg['input_size']
+)
+from deepinsight_iqa.diqa.train import Train
+trainer = Train(train, valid, **cfg)
+# %%
+subjective_datagen = (lambda datagen: (
+    (im_dist, mos)
+    for im_dist, im_ref, mos in datagen)
+)
+I_d, labels = next(subjective_datagen(train))
+# print(I_d)
+# print(labels)
+# %%
+I_d, I_r, labels = next(train)
+I_d, I_r = [tf.convert_to_tensor(im) for im in [I_d, I_r]]
+# %%
+I_d = tf.tile(I_d, (1, 1, 1, 3))
+y_pred = trainer.diqa.objective(I_d)
+# %%
+from deepinsight_iqa.diqa.handlers.utils import calculate_error_map
+_, e_gt, r = calculate_error_map(I_d, I_r, scaling_factor=1 / 32.)
+# scaling = 1/ 38. image_size = [416, 416], model = InceptionV3
+# scaling = 1/ 38, image_size= [416, 416], model = InceptionResNetV2
+# scaling = 1 / 32. , image_size = [416, 416], model = MobileNet
+# %%
+trainer.train()
+# %%
+# trainer.diqa.objective_score_model.load_weights("")
+trainer.train_subjective(trainer.diqa.subjective)
+# %%
+fig3, axes = plt.subplots(nrows=2, ncols=2)
+
+# %%
 # %% [markdown]
 # ## Objective Model and Subjective Model features
 import os

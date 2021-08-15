@@ -86,7 +86,7 @@ class AVARecordDataset(TFRecordDataset):
 
     Column 1: Index
 
-    Column 2: Image ID 
+    Column 2: Image ID
 
     Columns 3 - 12: Counts of aesthetics ratings on a scale of 1-10. Column 3 
     has counts of ratings of 1 and column 12 has counts of ratings of 10.

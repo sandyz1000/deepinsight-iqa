@@ -22,7 +22,7 @@ class Prediction:
         try:
             self.diqa = Diqa()
             self.diqa._build()
-            self.scoring_model = self.diqa.subjective_score_model
+            self.scoring_model = self.diqa.subjective
             # model_path = os.path.join(BASE_DIR, 'weights/diqa/', SUBJECTIVE_MODEL_NAME)
             self.scoring_model.load_weights(model_path)
         except Exception as e:
