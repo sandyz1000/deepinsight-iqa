@@ -23,18 +23,22 @@ def prepare_tf_record(dataset_type, image_dir, input_file):
 @click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
 @click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found', default=os.getcwd())
-@click.option('-f', '--input-file', required=True, help='input csv/json file')
-@click.option('-i', '--image-dir', help='directory with image files', required=True)
-def predict(algo, conf_file, base_dir, input_file, image_dir):
+@click.option('-i', '--image-filepath', help='directory with image files', required=True)
+def predict(algo, conf_file, base_dir, image_filepath):
     # Script use to predict Image quality using Deep image quality assesement
+    cfg = parse_config(base_dir, conf_file)
     if algo == "nima":
-        cfg = parse_config(base_dir, conf_file)
         from deepinsight_iqa.nima import predict
 
         return 0
     elif algo == "diqa":
-        from deepinsight_iqa.diqa import diqa
-
+        from deepinsight_iqa.diqa.predict import Prediction
+        prediction = Prediction(
+            model_dir=cfg['model_dir'], final_wts_filename=cfg['final_wts_filename'],
+            base_model_name=cfg['base_model_name']
+        )
+        score = prediction.predict(image_filepath)
+        print("Score: ", score)
         return 0
 
 
@@ -47,13 +51,17 @@ def parse_config(job_dir, config_file):
 
 @click.command()
 @click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
-@click.option('-tm', '--training_method', default='all', show_choices=["all", "subjective", "objective"],
+@click.option('-t', '--train_model', default='all', show_choices=["all", "subjective", "objective"],
               help="Arguments to mention if network need to be train completely or partially")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
-@click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found', default=os.getcwd())
+@click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found',
+              default=os.getcwd())
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
-def train(algo, training_method, conf_file, base_dir, input_file, image_dir):
+@click.option('-p', '--load_model', show_choices=["objective", "subjective"],
+              type=str, help='Set pretrained to start training using pretrained n/w',
+              default=None)
+def train(algo, train_model, conf_file, base_dir, input_file, image_dir, load_model=None):
     cfg = parse_config(base_dir, conf_file)
 
     def _train_diqa():
@@ -61,6 +69,7 @@ def train(algo, training_method, conf_file, base_dir, input_file, image_dir):
         from deepinsight_iqa.diqa.data import get_combine_datagen, get_iqa_datagen
         from deepinsight_iqa.diqa.utils.img_utils import image_preprocess
         dataset_type = cfg.pop('dataset_type')
+        # TODO: Based on dataset_type init the corresponding datagenerator
 
         train_datagen, valid_datagen = get_combine_datagen(
             image_dir, input_file, do_augment=cfg['use_augmentation'],
@@ -68,10 +77,8 @@ def train(algo, training_method, conf_file, base_dir, input_file, image_dir):
         )
 
         trainer = Train(train_datagen, valid_iter=valid_datagen, **cfg)
-        if training_method == "all":
-            trainer.train()
-        elif training_method == "all":
-            
+        trainer.loadweights(load_model)
+        trainer.train(train_model=train_model)
         return 0
 
     def _train_nima():
