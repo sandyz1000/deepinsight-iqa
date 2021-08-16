@@ -1,5 +1,6 @@
 import sys
 import os
+from typing import Optional
 import tensorflow as tf
 from .handlers.model import Diqa
 from .utils.img_utils import image_preprocess
@@ -18,37 +19,22 @@ print('__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
 
 @six.add_metaclass(thread_safe_singleton)
 class Prediction:
-    def __init__(self, model_path):
+    def __init__(
+        self,
+        model_dir: Optional[str] = None,
+        final_wts_filename: Optional[str] = None,
+        base_model_name: str = None,
+        custom=False
+    ):
         try:
-            self.diqa = Diqa()
+            model_path = os.path.join(model_dir, base_model_name, final_wts_filename)
+            self.diqa = Diqa(base_model_name, custom=custom)
             self.diqa._build()
             self.scoring_model = self.diqa.subjective
-            # model_path = os.path.join(BASE_DIR, 'weights/diqa/', SUBJECTIVE_MODEL_NAME)
             self.scoring_model.load_weights(model_path)
         except Exception as e:
             print("Unable to load DIQA model, check model path", str(e))
             sys.exit(1)
-
-    def get_image_score_pair(
-        self,
-        reference_image: Union[np.ndarray, tf.Tensor],
-        distorted_image: Union[np.ndarray, tf.Tensor]
-    ) -> Tuple[float, float]:
-        """
-        Return the score for the reference and distorted image, which can be later use for 
-        comparing with the target mos
-        Args:
-            reference_image ([type]): [description]
-            distorted_image ([type]): [description]
-
-        Returns:
-            [type]: [description]
-        """
-        I_d = image_preprocess(distorted_image)
-        I_r = image_preprocess(reference_image)
-        dist_prediction = self.scoring_model.predict(I_d)[0][0]
-        ref_prediction = self.scoring_model.predict(I_r)[0][0]
-        return dist_prediction, ref_prediction
 
     def predict(self, img: Union[np.ndarray, str]) -> float:
         assert img is not None, "Invalid path or image type"
@@ -56,7 +42,7 @@ class Prediction:
             img = cv2.imread(img, cv2.IMREAD_UNCHANGED)
 
         logger.info("Predicting the final score for IQA")
-        img = tf.convert_to_tensor(img, dtype=tf.float32)
+        img = tf.cast(img, dtype=tf.float32)
 
         start = perf_counter()
         I_d = image_preprocess(img)

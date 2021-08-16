@@ -9,7 +9,17 @@ from .utils.callbacks import TensorBoardBatch
 import logging
 from abc import abstractmethod, ABCMeta
 from six import add_metaclass
-logger = logging.getLogger()
+import tqdm
+import sys
+
+logger = logging.getLogger(__name__)
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.INFO)
+stdout_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(name)-12s %(levelname)-8s %(message)s", "%Y-%m-%dT%H:%M:%S"
+))
+logger.addHandler(stdout_handler)
+
 
 logger.info(
     '__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
@@ -48,7 +58,8 @@ class Trainer:
     def __init__(
         self,
         model_dir: Optional[str] = None,
-        model_filename: Optional[str] = None,
+        objective_wts_filename: Optional[str] = None,
+        final_wts_filename: Optional[str] = None,
         log_dir: str = './logs',
         epochs: int = 5, batch_size: int = 16,
         multiprocessing_data_load: bool = False,
@@ -69,11 +80,12 @@ class Trainer:
         4. Larger Batch size can be used for training
 
         """
-        base_model_name = kwargs.pop('base_model_name')
+        self.base_model_name = kwargs.pop('base_model_name')
         self.epochs = epochs
-        if not model_filename:
-            model_filename = generate_random_name(batch_size, epochs)
-        self.model_filename = model_filename
+        if not final_wts_filename:
+            final_wts_filename = generate_random_name(batch_size, epochs)
+        self.final_wts_filename = final_wts_filename
+        self.objective_wts_filename = objective_wts_filename
         self.model_dir = model_dir
         self.log_dir = log_dir
         self.multiprocessing_data_load = multiprocessing_data_load
@@ -84,10 +96,20 @@ class Trainer:
         self.steps_per_epoch = kwargs['steps_per_epoch']
         self.validation_steps = kwargs['validation_steps']
         self.kwargs = kwargs
-        self.diqa = Diqa(base_model_name, custom=custom)
+        self.diqa = Diqa(self.base_model_name, custom=custom)
         self.diqa._build()
 
-    def train(self, training_method='all', use_pretrained: bool = False):
+    def loadweights(self, load_model):
+        if load_model == "objective":
+            model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_wts_filename)
+            assert os.path.exists(model_path), FileNotFoundError("Objective Model file not found")
+            self.diqa.objective.load_weights(model_path)
+        elif load_model == "subjective":
+            model_path = os.path.join(self.model_dir, self.base_model_name, self.final_wts_filename)
+            assert os.path.exists(model_path), FileNotFoundError("Subjective Model file not found")
+            self.diqa.subjective.load_weights(model_path)
+
+    def train(self, train_model='all'):
         """
         Train objective Model
         ------------------------
@@ -101,20 +123,12 @@ class Trainer:
         Train Subjective Model
         ------------------------
         """
-        if use_pretrained and os.path.exists(self.model_filename):
-            self.diqa.subjective.load_weights(self.model_filename)
-
-        elif training_method == "subjective":
+        if train_model == "subjective":
             self.train_subjective(self.diqa.subjective)
-        elif training_method == "objective":
+        elif train_model == "objective":
             self.train_objective(self.diqa.objective)
         else:
-            # -------- OBJECTIVE TRAINING SESSION --------- #
-            # Load pre-trained model for objectives error map
             self.train_objective(self.diqa.objective)
-
-            # -------- SUBJECTIVE TRAINING SESSION --------- #
-            # Load pre-trained model for subjetive error map
             self.train_subjective(self.diqa.subjective)
 
     @abstractmethod
@@ -137,7 +151,8 @@ class TrainWithTFDS(Trainer):
         batch_size: int = 16,
         log_dir: Optional[str] = 'logs',
         model_dir: Optional[str] = None,
-        model_filename: Optional[str] = None,
+        final_wts_filename: Optional[str] = None,
+        objective_wts_filename: Optional[str] = None,
         use_pretrained: bool = False,
         custom: bool = False,
         verbose: bool = False,
@@ -145,7 +160,8 @@ class TrainWithTFDS(Trainer):
     ):
         super().__init__(
             model_dir=model_dir,
-            model_filename=model_filename,
+            final_wts_filename=final_wts_filename,
+            objective_wts_filename=objective_wts_filename,
             epochs=epochs,
             batch_size=batch_size,
             extra_epochs=extra_epochs,
@@ -203,11 +219,12 @@ class TrainWithTFDS(Trainer):
             )
 
         # Save model to destination path
-        model_path = f"{prefix}-{self.model_filename}"
+        model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_wts_filename)
+        os.makedirs(os.path.basename(model_path), exist_ok=True)
         model.save(model_path)
         return model
 
-    def train_subjective(self, model: tf.keras.Model, prefix='subjective-model'):
+    def train_subjective(self, model: tf.keras.Model):
         # TODO: Fix error here
         from tensorflow.keras.callbacks import TensorBoard
         train = self.tfdataset.map(lambda img: (self.image_preprocess(img)))
@@ -215,7 +232,8 @@ class TrainWithTFDS(Trainer):
         tensorboard.set_model(model)
 
         history = model.fit(train, epochs=self.epochs + self.extra_epochs, callbacks=[tensorboard])
-        model_path = f"{prefix}-{self.model_filename}"
+        model_path = os.path.join(self.model_dir, self.base_model_name, self.final_wts_filename)
+        os.makedirs(os.path.basename(model_path), exist_ok=True)
         model.save(model_path)
         return history
 
@@ -227,7 +245,8 @@ class Train(Trainer):
         train_iter: Union[Iterator, tf.data.Dataset],
         valid_iter: Union[Iterator, tf.data.Dataset] = None,
         model_dir: Optional[str] = None,
-        model_filename: Optional[str] = None,
+        final_wts_filename: Optional[str] = None,
+        objective_wts_filename: Optional[str] = None,
         epochs: int = 5, batch_size: int = 16,
         multiprocessing_data_load: bool = False,
         extra_epochs: int = 1, num_workers_data_load: int = 1,
@@ -239,7 +258,8 @@ class Train(Trainer):
     ):
         super().__init__(
             model_dir=model_dir,
-            model_filename=model_filename,
+            final_wts_filename=final_wts_filename,
+            objective_wts_filename=objective_wts_filename,
             epochs=epochs,
             batch_size=batch_size,
             extra_epochs=extra_epochs,
@@ -252,7 +272,7 @@ class Train(Trainer):
         self.train_generator = train_iter
         self.valid_generator = valid_iter
 
-    def train_objective(self, model: tf.keras.Model, prefix='objective-model'):
+    def train_objective(self, model: tf.keras.Model):
 
         train_step = TrainerStep(
             model, "train", True,
@@ -272,16 +292,13 @@ class Train(Trainer):
         #     ]
         # )
 
-        if self.use_pretrained and os.path.exists(self.model_filename):
-            self.final_model.load_weights(self.model_filename)
-
         # ## ------------------------------
         # BEGIN EPOCH
         # ## ------------------------------
         train_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'train'))
         test_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'valid'))
 
-        for epoch in range(self.epochs):
+        for epoch in tqdm.tqdm(range(self.epochs)):
             train_step_cnt = 0
             for I_d, I_r, mos in self.train_generator:
                 train_step(I_d, I_r)
@@ -322,10 +339,11 @@ class Train(Trainer):
                 )
 
         # Save the objective model
-        model_path = os.path.join(self.model_dir, f"{prefix}-{self.model_filename}")
+        model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_wts_filename)
+        os.makedirs(os.path.basename(model_path), exist_ok=True)
         model.save(model_path)
 
-    def train_subjective(self, model: tf.keras.Model, prefix='subjective-model'):
+    def train_subjective(self, model: tf.keras.Model):
         model_checkpointer = ModelCheckpoint(
             filepath=self.model_dir,
             monitor='val_loss',
@@ -351,6 +369,7 @@ class Train(Trainer):
             callbacks=[model_checkpointer]
         )
         # Save the subjective model
-        model_path = os.path.join(self.model_dir, f"{prefix}-{self.model_filename}")
+        model_path = os.path.join(self.model_dir, self.base_model_name, self.final_wts_filename)
+        os.makedirs(os.path.basename(model_path), exist_ok=True)
         model.save(model_path)
         K.clear_session()
