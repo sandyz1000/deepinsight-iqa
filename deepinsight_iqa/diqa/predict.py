@@ -3,13 +3,14 @@ import os
 from typing import Optional
 import tensorflow as tf
 from .handlers.model import Diqa
-from .utils.img_utils import image_preprocess
+from .utils.tf_imgutils import image_preprocess
 from time import perf_counter
 import logging
 import numpy as np
 from typing import Union, Tuple
 import cv2
 import six
+from skimage import io
 logger = logging.getLogger(__name__)
 from deepinsight_iqa.common.utility import thread_safe_singleton
 
@@ -37,7 +38,9 @@ class Prediction:
             sys.exit(1)
 
     def predict(self, img: Union[np.ndarray, str]) -> float:
-        assert img is not None, "Invalid path or image type"
+        if isinstance(img, str) and not os.path.exists(img):
+            raise FileNotFoundError("Invalid path or image type")
+        
         if isinstance(img, str):
             img = cv2.imread(img, cv2.IMREAD_UNCHANGED)
 

@@ -11,6 +11,7 @@ from abc import abstractmethod, ABCMeta
 from six import add_metaclass
 import tqdm
 import sys
+import enum
 
 logger = logging.getLogger(__name__)
 stdout_handler = logging.StreamHandler(sys.stdout)
@@ -25,6 +26,11 @@ logger.info(
     '__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
         __file__, __name__, str(__package__))
 )
+
+
+class ModelType(enum.Enum):
+    objective = "objective"
+    subjective = "subjective"
 
 
 def generate_random_name(batch_size, epochs):
@@ -99,17 +105,25 @@ class Trainer:
         self.diqa = Diqa(self.base_model_name, custom=custom)
         self.diqa._build()
 
-    def loadweights(self, load_model):
-        if load_model == "objective":
-            model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_wts_filename)
-            assert os.path.exists(model_path), FileNotFoundError("Objective Model file not found")
+    def loadweights(self, load_model: str):
+        filename = self.objective_wts_filename if load_model == ModelType.objective else self.final_wts_filename
+        model_path = os.path.join(self.model_dir, self.base_model_name, filename)
+        assert os.path.exists(model_path), FileNotFoundError("Objective Model file not found")
+        if load_model == ModelType.objective:
             self.diqa.objective.load_weights(model_path)
-        elif load_model == "subjective":
-            model_path = os.path.join(self.model_dir, self.base_model_name, self.final_wts_filename)
-            assert os.path.exists(model_path), FileNotFoundError("Subjective Model file not found")
+        else:
             self.diqa.subjective.load_weights(model_path)
 
-    def train(self, train_model='all'):
+    @abstractmethod
+    def train_subjective(self, model: tf.keras.Model):
+        """
+        Train Subjective Model
+        ------------------------
+        """
+        raise NotImplemented
+
+    @abstractmethod
+    def train_objective(self, model: tf.keras.Model):
         """
         Train objective Model
         ------------------------
@@ -120,122 +134,13 @@ class Trainer:
         3. Use the optimizer to update the weights.
         4. Print the accuracy.
 
-        Train Subjective Model
-        ------------------------
+        Args:
+            model ([type]): [description]
+
+        Raises:
+            NotImplemented: [description]
         """
-        if train_model == "subjective":
-            self.train_subjective(self.diqa.subjective)
-        elif train_model == "objective":
-            self.train_objective(self.diqa.objective)
-        else:
-            self.train_objective(self.diqa.objective)
-            self.train_subjective(self.diqa.subjective)
-
-    @abstractmethod
-    def train_subjective(self, model: tf.keras.Model, prefix='subjective-model'):
         raise NotImplemented
-
-    @abstractmethod
-    def train_objective(self, model: tf.keras.Model, prefix='objective-model'):
-        raise NotImplemented
-
-
-class TrainWithTFDS(Trainer):
-    def __init__(
-        self,
-        train_iter: Union[Iterator, tf.data.Dataset],
-        valid_iter: Union[Iterator, tf.data.Dataset] = None,
-        image_preprocess: Optional[Callable] = None,
-        epochs: int = 5,
-        extra_epochs: int = 1,
-        batch_size: int = 16,
-        log_dir: Optional[str] = 'logs',
-        model_dir: Optional[str] = None,
-        final_wts_filename: Optional[str] = None,
-        objective_wts_filename: Optional[str] = None,
-        use_pretrained: bool = False,
-        custom: bool = False,
-        verbose: bool = False,
-        **kwargs
-    ):
-        super().__init__(
-            model_dir=model_dir,
-            final_wts_filename=final_wts_filename,
-            objective_wts_filename=objective_wts_filename,
-            epochs=epochs,
-            batch_size=batch_size,
-            extra_epochs=extra_epochs,
-            use_pretrained=use_pretrained,
-            log_dir=log_dir, custom=custom, verbose=verbose,
-            **kwargs
-        )
-        self.image_preprocess = image_preprocess
-        self.tfdataset_train = train_iter
-        self.tfdataset_valid = valid_iter
-        self.final_model = self.diqa.subjective
-
-    def train_objective(self, model: tf.keras.Model, prefix='objective-model'):
-        train_step = TrainerStep(
-            self.warmup_model, "train", True,
-            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
-            scaling_factor=self.kwargs['scaling_factor']
-        )
-        valid_step = TrainerStep(
-            self.warmup_model, "valid", False,
-            scaling_factor=self.kwargs['scaling_factor']
-        )
-        tensorboard = TensorBoardBatch(
-            self.log_dir,
-            metrics=[
-                {'loss': train_step.loss}, {'accuracy': train_step.accuracy},
-                {'val_loss': valid_step.loss}, {'val_accuracy': valid_step.accuracy}
-            ]
-        )
-        tensorboard.set_model(model)
-        train_summary_writer = tf.summary.create_file_writer(self.log_dir)
-        test_summary_writer = tf.summary.create_file_writer(self.log_dir)
-        for epoch in range(self.epochs):
-            for I_d, I_r, mos in self.tfdataset_train:
-                train_step(I_d, I_r)
-            with train_summary_writer.as_default():
-                tf.summary.scalar('loss', train_step.loss.result(), step=epoch)
-                tf.summary.scalar('accuracy', train_step.accuracy.result(), step=epoch)
-
-            for I_d, I_r, mos in self.tfdataset_valid:
-                valid_step(I_d, I_r)
-            with test_summary_writer.as_default():
-                tf.summary.scalar('loss', valid_step.loss.result(), step=epoch)
-                tf.summary.scalar('accuracy', valid_step.accuracy.result(), step=epoch)
-
-            # Invoke tensorflow callback here
-            tensorboard.on_epoch_end(epoch)
-            template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
-            print(template.format(
-                epoch + 1,
-                train_step.loss.result(),
-                train_step.accuracy.result() * 100,
-                valid_step.loss.result(),
-                valid_step.accuracy.result() * 100)
-            )
-
-        # Save model to destination path
-        model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_wts_filename)
-        os.makedirs(os.path.basename(model_path), exist_ok=True)
-        model.save(model_path)
-        return model
-
-    def train_subjective(self, model: tf.keras.Model):
-        # TODO: Fix error here
-        from tensorflow.keras.callbacks import TensorBoard
-        train = self.tfdataset.map(lambda img: (self.image_preprocess(img)))
-        tensorboard = TensorBoard(self.log_dir)
-        tensorboard.set_model(model)
-
-        history = model.fit(train, epochs=self.epochs + self.extra_epochs, callbacks=[tensorboard])
-        model_path = os.path.join(self.model_dir, self.base_model_name, self.final_wts_filename)
-        os.makedirs(os.path.basename(model_path), exist_ok=True)
-        model.save(model_path)
-        return history
 
 
 class Train(Trainer):
@@ -269,8 +174,8 @@ class Train(Trainer):
             log_dir=log_dir, custom=custom, verbose=verbose,
             **kwargs
         )
-        self.train_generator = train_iter
-        self.valid_generator = valid_iter
+        self.trainiter = train_iter
+        self.validiter = valid_iter
 
     def train_objective(self, model: tf.keras.Model):
 
@@ -300,7 +205,7 @@ class Train(Trainer):
 
         for epoch in tqdm.tqdm(range(self.epochs)):
             train_step_cnt = 0
-            for I_d, I_r, mos in self.train_generator:
+            for I_d, I_r, mos in self.trainiter:
                 train_step(I_d, I_r)
                 train_step_cnt += 1
                 if train_step_cnt >= self.steps_per_epoch:
@@ -309,9 +214,9 @@ class Train(Trainer):
                 tf.summary.scalar('loss', train_step.loss.result(), step=epoch)
                 tf.summary.scalar('accuracy', train_step.accuracy.result(), step=epoch)
 
-            if self.valid_generator:
+            if self.validiter:
                 valid_step_cnt = 0
-                for I_d, I_r, mos in self.valid_generator:
+                for I_d, I_r, mos in self.validiter:
                     valid_step(I_d, I_r)
                     valid_step_cnt += 1
                     if valid_step_cnt >= self.validation_steps:
@@ -321,7 +226,7 @@ class Train(Trainer):
                     tf.summary.scalar('accuracy', valid_step.accuracy.result(), step=epoch)
 
             # tensorboard.on_epoch_end(epoch)
-            if self.valid_generator:
+            if self.validiter:
                 template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
                 logging.info(template.format(
                     epoch + 1,
@@ -357,9 +262,9 @@ class Train(Trainer):
         )
 
         model.fit(
-            subjective_datagen(self.train_generator),
+            subjective_datagen(self.trainiter),
             steps_per_epoch=self.steps_per_epoch,
-            validation_data=subjective_datagen(self.valid_generator),
+            validation_data=subjective_datagen(self.validiter),
             validation_steps=self.validation_steps,
             epochs=self.epochs + self.extra_epochs,
             initial_epoch=self.epochs,

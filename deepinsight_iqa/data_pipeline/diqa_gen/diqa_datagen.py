@@ -1,19 +1,20 @@
 import itertools
-from typing import Tuple, Callable, Dict, List
+from typing import Tuple, Callable, Dict, List, Union
 import pandas as pd
 from deepinsight_iqa.common import image_aug
 import tensorflow as tf
 import numpy as np
-from keras.applications.imagenet_utils import preprocess_input
 from six import add_metaclass
 from abc import ABCMeta, abstractmethod
 import os
+from functools import partial
 IMG_EXT = "jpg"
 _AVA_OUTYPE = Tuple[Tuple[np.ndarray, str, str], float, List[int]]
 
 
 def load_image(img_file, target_size=None):
-    return np.asarray(tf.keras.preprocessing.image.load_img(img_file, target_size=target_size))
+    pilimg = tf.keras.preprocessing.image.load_img(img_file, target_size=target_size)
+    return tf.keras.preprocessing.image.img_to_array(pilimg)
 
 
 def read_image(filename: str, **kwargs) -> tf.Tensor:
@@ -46,8 +47,8 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
 
     def __init__(
         self,
-        df: pd.DataFrame,
         img_dir: str,
+        df: pd.DataFrame,
         batch_size: int = 32,
         img_preprocessing: Callable = None,
         input_size: Tuple[int] = (256, 256),
@@ -119,15 +120,14 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
                     for im in [distorted_image, reference_image]
                 ]
 
-            if self.channel_dim == 3:
-                distorted_image, reference_image = [
-                    tf.tile(im, (1, 1, self.channel_dim))
-                    for im in [distorted_image, reference_image]
-                ]
+            distorted_image, reference_image = [
+                tf.tile(im, (1, 1, self.channel_dim)) if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
+                for im in [distorted_image, reference_image]
+            ]
 
             if self.do_augment:
                 distorted_image, reference_image = [
-                    # tf.convert_to_tensor(image_aug.augment_img(im, augmentation_name='geometric'))
+                    # image_aug.augment_img(im, augmentation_name='geometric'),
                     _augmentation(im, rand_crop_dims=self.input_size)
                     for im in [distorted_image, reference_image]
                 ]
@@ -135,13 +135,13 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
             X_dist.append(distorted_image)
             X_ref.append(reference_image)
             mos.append(label)
-        X_dist, X_ref, mos = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, mos]]
+        X_dist, X_ref, mos = (tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, mos])
         return X_dist, X_ref, mos
 
     def __eval_datagen__(self, batch_samples):
         """ initialize images and labels tensors for faster processing """
 
-        X_dist, X_ref, Y = [], [], []
+        X_dist, X_ref, mos = [], [], []
         for i, sample in enumerate(batch_samples):
             i_d, i_r, label = self.data_parser(*sample)
             distorted_image, reference_image = (load_image(im, target_size=self.input_size) for im in [i_d, i_r])
@@ -150,17 +150,17 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
                     tf.squeeze(self.img_preprocessing(im), axis=0)
                     for im in [distorted_image, reference_image]
                 ]
-            if self.channel_dim == 3:
-                distorted_image, reference_image = [
-                    tf.tile(im, (1, 1, self.channel_dim))
-                    for im in [distorted_image, reference_image]
-                ]
+
+            distorted_image, reference_image = [
+                tf.tile(im, (1, 1, self.channel_dim)) if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
+                for im in [distorted_image, reference_image]
+            ]
             X_dist.append(distorted_image)
             X_ref.append(reference_image)
-            Y.append(label)
-        
-        X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
-        return X_dist, X_ref, Y
+            mos.append(label)
+
+        X_dist, X_ref, mos = (tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, mos])
+        return X_dist, X_ref, mos
 
 
 class LiveDataRowParser(DiqaDataGenerator):
@@ -245,8 +245,8 @@ class CSIQDataRowParser(DiqaDataGenerator):
 class AVADataRowParser(DiqaDataGenerator):
     def __init__(
             self,
-            ava_txt: str,
             img_dir: str,
+            ava_txt: str,
             challenges_file='challenges.txt',
             tags_file='tags.txt',
             batch_size: int = 32,
@@ -337,7 +337,7 @@ class AVADataRowParser(DiqaDataGenerator):
             features.append([img, challenge, "|".join(linked_tags)])
             mos_scores.append(mos)
             distributions.append(scoredis)
-        
+
         return features, mos_scores, distributions
 
     def __eval_datagen__(self, batch_samples):
@@ -355,6 +355,12 @@ class AVADataRowParser(DiqaDataGenerator):
         return features, mos_scores, distributions
 
 
+def get_predict_datagenerator(
+
+):
+    pass
+
+
 def get_deepiqa_datagenerator(
     image_dir: str,
     samples: np.ndarray,
@@ -362,16 +368,29 @@ def get_deepiqa_datagenerator(
     img_preprocessing: Callable = None,
     input_size: Tuple[int] = (256, 256),
     img_crop_dims: Tuple[int] = (224, 224),
-    shuffle: bool = False, do_augment: bool = False, channel_dim: int = 3,
+    shuffle: bool = False, do_augment: bool = False, channel_dim: int = 3, **kwargs
 ):
     """
-    Generator that will generate image for AVA, TID2013 and CSIQ dataset
-    """
+    Generator that will generate shuffle image for AVA, TID2013 and CSIQ dataset combined
+    
+    Args:
+        image_dir ([type]): [description]
+        samples ([type]): [description]
+        batch_size ([type], optional): [description]. Defaults to 32.
+        img_preprocessing ([type], optional): [description]. Defaults to None.
+        input_size ([type], optional): [description]. Defaults to (256, 256).
+        img_crop_dims ([type], optional): [description]. Defaults to (224, 224).
+        shuffle ([type], optional): [description]. Defaults to False.
+        do_augment ([type], optional): [description]. Defaults to False.
+        channel_dim ([type], optional): [description]. Defaults to 3.
+
+    Yields:
+        [type]: [description]
+    """    
     if shuffle:
         np.random.shuffle(samples)
 
-    zipped = itertools.cycle(samples)
-    # zipped = iter(samples)
+    zipped = iter(samples)
     # apply_aug = (lambda im: image_aug.augment_img(im, augmentation_name='geometric'))
     apply_aug = _augmentation
     while True:
@@ -380,26 +399,26 @@ def get_deepiqa_datagenerator(
         Y = []
 
         for _ in range(batch_size):
-            row = next(zipped)
-            _, i_d, i_r, mos_score = row
-            i_d, i_r = [load_image(os.path.join(image_dir, im), target_size=input_size) for im in [i_d, i_r]]
+            try:
+                row = next(zipped)
+                _, i_d, i_r, mos_score = row
+                i_d, i_r = [load_image(os.path.join(image_dir, im), target_size=input_size) for im in [i_d, i_r]]
 
-            if img_preprocessing:
+                if img_preprocessing:
+                    i_d, i_r = [tf.squeeze(img_preprocessing(im), axis=0) for im in [i_d, i_r]]
+
                 i_d, i_r = [
-                    tf.squeeze(img_preprocessing(im), axis=0).numpy()
+                    tf.tile(im, (1, 1, channel_dim)) if channel_dim == 3 and im.get_shape()[-1] != 3 else im
                     for im in [i_d, i_r]
                 ]
-            if channel_dim == 3:
-                i_d, i_r = [
-                    tf.tile(im, (1, 1, channel_dim))
-                    for im in [i_d, i_r]
-                ]
-            if do_augment:
-                i_d, i_r = [apply_aug(im, rand_crop_dims=img_crop_dims) for im in [i_d, i_r]]
+                if do_augment:
+                    i_d, i_r = [apply_aug(im, rand_crop_dims=img_crop_dims) for im in [i_d, i_r]]
 
-            X_dist.append(i_d)
-            X_ref.append(i_r)
-            Y.append(mos_score)
+                X_dist.append(i_d)
+                X_ref.append(i_r)
+                Y.append(mos_score)
+            except StopIteration:
+                break
 
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
         yield X_dist, X_ref, Y
@@ -407,8 +426,6 @@ def get_deepiqa_datagenerator(
 
 def combine_deepiqa_dataset(data_dir: str, csvspathmap: Dict[str, str], output_csv: str) -> None:
     """ Combine all csv to single csv file that can be used by the data-generator
-
-
     """
     from functools import partial
 
@@ -475,3 +492,57 @@ def combine_deepiqa_dataset(data_dir: str, csvspathmap: Dict[str, str], output_c
         dataset = dataset.append(current, ignore_index=True)
     output_csv = os.path.join(data_dir, output_csv)
     dataset.to_csv(output_csv)
+
+
+def get_tfdataset(
+    image_dir: str,
+    samples: Union[np.ndarray, pd.DataFrame],
+    generator_fn: Callable,
+    batch_size: int = 32,
+    img_preprocessing: Callable = None,
+    input_size: Tuple[int] = (256, 256),
+    img_crop_dims: Tuple[int] = (224, 224),
+    shuffle: bool = False, do_augment: bool = False, channel_dim: int = 3,
+    is_training=True, **kwargs
+) -> tf.data.Dataset:
+    """Function to convert Keras Sequence to tensorflow dataset
+
+    Args:
+        image_dir ([str]): [description]
+        samples ([Union[np.ndarray, pd.DataFrame]]): [description]
+        generator_fn ([type]): [description]
+        batch_size ([type], optional): [description]. Defaults to 32.
+        img_preprocessing ([type], optional): [description]. Defaults to None.
+        input_size ([type], optional): [description]. Defaults to (256, 256).
+        img_crop_dims ([type], optional): [description]. Defaults to (224, 224).
+        shuffle ([type], optional): [description]. Defaults to False.
+        do_augment ([type], optional): [description]. Defaults to False.
+        channel_dim ([type], optional): [description]. Defaults to 3.
+
+    Returns:
+        [tf.data.Dataset]: [description]
+    """
+    output_shape = ([None, *input_size, channel_dim], [None, *input_size, channel_dim], [None]),
+    output_type = (tf.float32, tf.float32, tf.float32)
+    image_gen = partial(
+        generator_fn,
+        image_dir,
+        samples,
+        img_preprocessing=img_preprocessing,
+        input_size=input_size,
+        img_crop_dims=img_crop_dims,
+        batch_size=batch_size,
+        shuffle=shuffle, do_augment=do_augment, channel_dim=channel_dim,
+        **kwargs
+    )
+
+    steps_per_epoch = np.floor(len(samples) / batch_size)
+    AUTOTUNE = tf.data.experimental.AUTOTUNE
+    train_ds = tf.data.Dataset.from_generator(
+        image_gen,
+        output_types=output_type, output_shapes=output_shape
+    )
+    if is_training:
+        train_ds = train_ds.repeat()
+    train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
+    return train_ds, steps_per_epoch

@@ -3,7 +3,8 @@ import os.path
 import tensorflow as tf
 import tensorflow_datasets.public_api as tfds
 
-from . import CHECKSUMS_PATH
+DATASETS_PATH = os.path.dirname(os.path.abspath(__file__))
+CHECKSUMS_PATH = os.path.normpath(os.path.join(DATASETS_PATH, 'url_checksums'))
 
 tfds.download.add_checksums_dir(CHECKSUMS_PATH)
 

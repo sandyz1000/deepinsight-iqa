@@ -1,5 +1,5 @@
 import tensorflow as tf
-from ..utils.img_utils import rescale
+from ..utils.tf_imgutils import rescale
 
 
 def error_map(reference: tf.Tensor, distorted: tf.Tensor, p: float = 0.2) -> tf.Tensor:

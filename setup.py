@@ -1,13 +1,23 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
-
+requirements = [
+    "numpy",
+    "tensorflow",
+    "opencv-python",
+    "matplotlib",
+    "Pillow",
+    "scikit-learn",
+    "click",
+    "tensorflow_datasets"
+]
 setup(
     name="deepinsight-iqa",
     entry_points={
-        'console_script': [
-            "deepiqa_train=deepinsightiqa_iqa.cli:train",
-            "deepiqa_predict=deepinsightiqa_iqa.cli:predict",
-            "deepiqa_eval=deepinsightiqa_iqa.cli:evaluate",
+        'console_scripts': [
+            "deepiqa_train=deepinsight_iqa.cli:train",
+            "deepiqa_predict=deepinsight_iqa.cli:predict",
+            "deepiqa_eval=deepinsight_iqa.cli:evaluate",
+            "deepiqa_prepare_tfrecord=deepinsight_iqa.cli:prepare_tf_record"
         ],
     },
     version="0.1.0",
@@ -17,9 +27,9 @@ setup(
     long_description_content_type="text/markdown",
     author="Sandip Dey",
     author_email="sandip.dey1988@yahoo.com",
-    packages=['src'],
+    packages=['deepinsight_iqa'],
     include_package_data=True,
-    install_requires=open("requirements.txt", 'r').readlines(),
+    install_requires=requirements,
     platforms=["linux", "unix"],
-    python_requires=">3.5.2",
+    python_requires=">3.7.5",
 )
