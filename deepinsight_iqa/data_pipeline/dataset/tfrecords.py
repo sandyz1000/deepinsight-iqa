@@ -71,6 +71,21 @@ class TFRecordDataset:
         dataset = files.flat_map(tf.data.TFRecordDataset)
         return dataset.map(lambda x: self._parse_tfrecord(x))
 
+    def split_tfrecord_files(self, file_pattern, batch_size=10):
+        """ Split tf-records files to multiple tf-records file """
+        outfile = os.path.basename(os.path.splitext(file_pattern))
+        dirname = os.path.dirname(outfile)
+        raw_dataset = self.load_tfrecord_dataset(file_pattern)
+        batch_idx = 0
+        for batch in raw_dataset.batch(batch_size):
+            # Converting `batch` back into a `Dataset`, assuming batch is a `tuple` of `tensors`
+            batch_ds = tf.data.Dataset.from_tensor_slices(tuple([*batch]))
+            filename = os.path.join(dirname, 'tfchunks', f'{outfile}.tfrecord.{batch_idx:03d}')
+
+            writer = tf.data.experimental.TFRecordWriter(filename)
+            writer.write(batch_ds)
+            batch_idx += 1
+
 
 class AVARecordDataset(TFRecordDataset):
     DESCRIPTION = """
@@ -266,19 +281,23 @@ class Tid2013RecordDataset(TFRecordDataset):
         tfrecord_path=os.path.expanduser("~/tensorflow_dataset/tid2013/data.tf.records",),
         **kwargs
     ):
+        # TODO: Split record and save into multiple chunks
         super().write_tfrecord_dataset(input_dir, csv_filename, tfrecord_path=tfrecord_path, **kwargs)
+        batch_size = kwargs.get('batch_size', 32)
         lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
-            for line in tqdm.tqdm(lines[1:]):
+            for index, line in tqdm.tqdm(enumerate(lines[1:])):
                 mos = line[2]
                 distorted_image = tf.io.decode_image(tf.io.read_file(os.path.join(input_dir, line[0])))
                 reference_image = tf.io.decode_image(tf.io.read_file(os.path.join(input_dir, line[1])))
                 example = self._serialize_feat(tf.io.serialize_tensor(distorted_image),
                                                tf.io.serialize_tensor(reference_image),
                                                mos)
+                
                 writer.write(example)
-
+                batches = []
+                
         return tfrecord_path
 
 

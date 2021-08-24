@@ -1,11 +1,77 @@
 # %%
 import os
+import sys
 import matplotlib.pyplot as plt
 import numpy as np
-import numpy as np
-import imutils
 import cv2
+import json
 import tensorflow as tf
+sys.path.append(os.path.realpath(os.pardir))
+from deepinsight_iqa.diqa.data import get_combine_datagen
+from deepinsight_iqa.diqa.utils.tf_imgutils import image_normalization, image_preprocess
+
+
+def parse_config(job_dir, config_file):
+    os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
+    os.makedirs(os.path.join(job_dir, 'logs'), exist_ok=True)
+    config = json.load(open(config_file, 'r'))
+    return config
+
+
+job_dir = os.path.realpath(os.path.pardir)
+# %% [markdown]
+# ## Set image directory and path
+# %%
+image_dir, csv_path = "/Users/sdey/Documents/dataset/image-quality-assesement", "combine.csv"
+config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_mobilenet.json"))
+cfg = parse_config(job_dir, config_file)
+train, valid = get_combine_datagen(
+    image_dir, csv_path, do_augment=cfg['use_augmentation'],
+    image_preprocess=image_preprocess, input_size=cfg['input_size']
+)
+# %%
+it = iter(train)
+X_dist, X_ref, Y = next(it)
+
+# %%
+from deepinsight_iqa.diqa.train import Train
+trainer = Train(train, valid, **cfg)
+# %%
+from deepinsight_iqa.diqa.predict import Prediction
+from urllib.request import urlopen
+from urllib.error import HTTPError
+
+
+# %%
+model_dir = os.path.join(os.path.expanduser('~/Documents/utilities-github/deepinsight-iqa'), cfg['model_dir'])
+prediction = Prediction(
+    model_dir=model_dir, final_wts_filename=cfg['final_wts_filename'],
+    base_model_name=cfg['base_model_name']
+)
+
+# %%
+import pandas as pd
+
+df = pd.read_csv(os.path.join(image_dir, "PhotoQualitySampleSheet2.csv"))
+
+# %%
+count = 0
+def download_npredict(url, readFlag=cv2.IMREAD_COLOR):
+    """
+    Download the image, convert it to a NumPy array, and then read it into OpenCV format
+    """
+    try:
+        resp = urlopen(url)
+        image = np.asarray(bytearray(resp.read()), dtype="uint8")
+        image = cv2.imdecode(image, readFlag)
+        score = prediction.predict(image)
+        count += 1
+        return score
+    except Exception:
+        return None
+
+df['diqa'] = df['url'].apply(download_npredict)
+# %%
 
 # %% [markdown]
 # ## Verify Data generator for AVA, CSIQ, TID2013, LIVE

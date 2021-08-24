@@ -1,13 +1,10 @@
 
 # %%
-import imageio
-import random
 import tensorflow as tf
 from tensorflow.keras.layers import Conv2D, Dense, GlobalAveragePooling2D
 # from keras.layers import Conv2D, Dense, GlobalAveragePooling2D
-from utils import show_images, gaussian_filter, image_normalization, rescale, image_shape
-import keras
-import keras.backend as K
+from deepinsight_iqa.diqa.utils.tf_imgutils import gaussian_filter, image_normalization, rescale, image_shape
+import tensorflow.keras.backend as K
 import imquality.datasets
 
 

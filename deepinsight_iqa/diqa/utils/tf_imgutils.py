@@ -1,9 +1,18 @@
 import math
 import tensorflow as tf
-import numpy as np
 
 
 def image_normalization(image: tf.Tensor, new_min=0, new_max=255) -> tf.Tensor:
+    """Normalize the input image to a given range set by min and max parameter
+
+    Args:
+        image ([type]): [description]
+        new_min ([type], optional): [description]. Defaults to 0.
+        new_max ([type], optional): [description]. Defaults to 255.
+
+    Returns:
+        [tensorflow.Tensor]: Normalized image
+    """
     original_dtype = image.dtype
     new_min = tf.constant(new_min, dtype=tf.float32)
     new_max = tf.constant(new_max, dtype=tf.float32)
@@ -62,34 +71,6 @@ def rescale(image: tf.Tensor, scale: float, dtype=tf.float32, **kwargs) -> tf.Te
 def read_image(filename: str, **kwargs) -> tf.Tensor:
     stream = tf.io.read_file(filename)
     return tf.image.decode_image(stream, **kwargs)
-
-
-def random_crop(img, crop_dims):
-    h, w = img.shape[0], img.shape[1]
-    ch, cw = crop_dims[0], crop_dims[1]
-    assert h >= ch, 'image height is less than crop height'
-    assert w >= cw, 'image width is less than crop width'
-    x = np.random.randint(0, w - cw + 1)
-    y = np.random.randint(0, h - ch + 1)
-    return img[y:(y + ch), x:(x + cw), :]
-
-
-def random_vertical_flip(img):
-    assert len(img.shape) == 3, 'input tensor must have 3 dimensions (height, width, channels)'
-    assert img.shape[2] == 3, 'image not in channels last format'
-    if np.random.random() < 0.5:
-        img = img[..., ::-1]
-    return img
-
-
-def random_horizontal_flip(img):
-    assert len(img.shape) == 3, 'input tensor must have 3 dimensions (height, width, channels)'
-    assert img.shape[2] == 3, 'image not in channels last format'
-    if np.random.random() < 0.5:
-        img = img.swapaxes(1, 0)
-        img = img[::-1, ...]
-        img = img.swapaxes(0, 1)
-    return img
 
 
 def image_preprocess(image: tf.Tensor, SCALING_FACTOR=1 / 4) -> tf.Tensor:

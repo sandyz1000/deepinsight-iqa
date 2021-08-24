@@ -1,7 +1,16 @@
 import os
+import sys
 from deepinsight_iqa.data_pipeline.diqa_gen import diqa_datagen
 from typing import Callable
 import pandas as pd
+import logging
+logger = logging.getLogger(__name__)
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.INFO)
+stdout_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(name)-12s %(levelname)-8s %(message)s", "%Y-%m-%dT%H:%M:%S"
+))
+logger.addHandler(stdout_handler)
 
 
 def get_combine_datagen(
@@ -13,23 +22,25 @@ def get_combine_datagen(
     df = pd.read_csv(os.path.join(image_dir, csv_path))
     samples_train, samples_test = df.iloc[:int(len(df) * 0.7), ].to_numpy(), df.iloc[int(len(df) * 0.7):, ].to_numpy()
 
-    train_generator = diqa_datagen.get_deepiqa_datagenerator(
+    train_tfdataset, train_steps = diqa_datagen.get_tfdataset(
         image_dir, samples_train,
+        generator_fn=diqa_datagen.get_deepiqa_datagenerator,
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
         **kwargs
     )
 
-    valid_generator = diqa_datagen.get_deepiqa_datagenerator(
+    valid_tfdataset, valid_steps = diqa_datagen.get_tfdataset(
         image_dir, samples_test,
+        generator_fn=diqa_datagen.get_deepiqa_datagenerator,
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
         **kwargs
     )
-
-    return train_generator, valid_generator
+    logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
+    return train_tfdataset, valid_tfdataset
 
 
 def get_iqa_datagen(
@@ -55,24 +66,26 @@ def get_iqa_datagen(
 
     data_gen_cls = _DATAGEN_MAPPING[dataset_type]
 
-    train_generator = data_gen_cls(
-        samples_train,
+    train_tfds, train_steps = diqa_datagen.get_tfdataset(
         image_dir,
-        batch_size,
+        samples_train,
+        generator_fn=data_gen_cls,
+        batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
         shuffle=True,
         **kwargs
     )
 
-    valid_generator = data_gen_cls(
-        samples_test,
+    valid_tfds, valid_steps = diqa_datagen.get_tfdataset(
         image_dir,
-        batch_size,
+        samples_test,
+        generator_fn=data_gen_cls,
+        batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
         shuffle=False,
         **kwargs
     )
-
-    return train_generator, valid_generator
+    logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
+    return train_tfds, valid_tfds
