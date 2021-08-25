@@ -34,8 +34,8 @@ it = iter(train)
 X_dist, X_ref, Y = next(it)
 
 # %%
-from deepinsight_iqa.diqa.train import Train
-trainer = Train(train, valid, **cfg)
+from deepinsight_iqa.diqa.train import Trainer
+trainer = Trainer(train, valid, **cfg)
 # %%
 from deepinsight_iqa.diqa.predict import Prediction
 from urllib.request import urlopen

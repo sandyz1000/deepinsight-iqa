@@ -71,7 +71,7 @@ class TFRecordDataset:
         dataset = files.flat_map(tf.data.TFRecordDataset)
         return dataset.map(lambda x: self._parse_tfrecord(x))
 
-    def split_tfrecord_files(self, file_pattern, batch_size=10):
+    def split_tfrecord_files(self, file_pattern, batch_size=16):
         """ Split tf-records files to multiple tf-records file """
         outfile = os.path.basename(os.path.splitext(file_pattern))
         dirname = os.path.dirname(outfile)
@@ -235,11 +235,11 @@ class AVARecordDataset(TFRecordDataset):
 
 class Tid2013RecordDataset(TFRecordDataset):
     DESCRIPTIONS = """
-    The TID2013 contains 25 reference images and 3000 distorted images 
-    (25 reference images x 24 types of distortions x 5 levels of distortions). 
-    Reference images are obtained by cropping from Kodak Lossless True Color Image Suite. 
-    All images are saved in database in Bitmap format without any compression. File names are 
-    organized in such a manner that they indicate a number of the reference image, 
+    The TID2013 contains 25 reference images and 3000 distorted images
+    (25 reference images x 24 types of distortions x 5 levels of distortions).
+    Reference images are obtained by cropping from Kodak Lossless True Color Image Suite.
+    All images are saved in database in Bitmap format without any compression. File names are
+    organized in such a manner that they indicate a number of the reference image,
     then a number of distortion's type, and, finally, a number of distortion's level: "iXX_YY_Z.bmp".
     """
 
@@ -281,9 +281,9 @@ class Tid2013RecordDataset(TFRecordDataset):
         tfrecord_path=os.path.expanduser("~/tensorflow_dataset/tid2013/data.tf.records",),
         **kwargs
     ):
-        # TODO: Split record and save into multiple chunks
+        # TODO: Split record and save into multiple chunks, move writer inside loop
+        # https://stackoverflow.com/questions/54519309/split-tfrecords-file-into-many-tfrecords-files
         super().write_tfrecord_dataset(input_dir, csv_filename, tfrecord_path=tfrecord_path, **kwargs)
-        batch_size = kwargs.get('batch_size', 32)
         lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
@@ -296,7 +296,6 @@ class Tid2013RecordDataset(TFRecordDataset):
                                                mos)
                 
                 writer.write(example)
-                batches = []
                 
         return tfrecord_path
 
@@ -379,7 +378,7 @@ class CSIQRecordDataset(TFRecordDataset):
         lines = [line.strip().split(",") for line in tf.io.gfile.GFile(input_dir + os.sep + csv_filename).readlines()]
         os.makedirs(os.path.dirname(tfrecord_path), exist_ok=True)
         with tf.io.TFRecordWriter(tfrecord_path) as writer:
-            for line in tqdm.tqdm(lines[1:]):
+            for line in tqdm.tqdm(enumerate(lines[1:])):
                 image, dst_idx, dst_type, dst_lev, dmos_std, dmos = line
                 dst_type = re.sub(re.compile(r'\s+'), '', dst_type)
                 dst_img_path = os.path.join(
