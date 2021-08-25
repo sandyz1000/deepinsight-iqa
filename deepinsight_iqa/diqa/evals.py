@@ -49,7 +49,7 @@ class Evaluation:
         Returns:
             [type]: [description]
         """
-        from deepinsight_iqa.diqa.utils.img_utils import image_preprocess
+        from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
         I_d = image_preprocess(distorted_image)
         I_r = image_preprocess(reference_image)
         dist_prediction = self.scoring_model.predict(I_d)[0][0]

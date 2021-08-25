@@ -7,8 +7,6 @@ import tensorflow.keras.backend as K
 from .handlers.model import Diqa
 from .utils.callbacks import TensorBoardBatch
 import logging
-from abc import abstractmethod, ABCMeta
-from six import add_metaclass
 import tqdm
 import sys
 import enum
@@ -59,18 +57,20 @@ class TrainerStep:
         self.accuracy(e_gt, self.model(I_d))
 
 
-@add_metaclass(ABCMeta)
 class Trainer:
+
     def __init__(
         self,
+        train_iter: Union[Iterator, tf.data.Dataset],
+        valid_iter: Union[Iterator, tf.data.Dataset] = None,
         model_dir: Optional[str] = None,
-        objective_wts_filename: Optional[str] = None,
         final_wts_filename: Optional[str] = None,
-        log_dir: str = './logs',
+        objective_wts_filename: Optional[str] = None,
         epochs: int = 5, batch_size: int = 16,
         multiprocessing_data_load: bool = False,
         extra_epochs: int = 1, num_workers_data_load: int = 1,
         use_pretrained: bool = False,
+        log_dir: str = 'logs',
         custom: bool = False,
         verbose: bool = False,
         **kwargs
@@ -105,77 +105,18 @@ class Trainer:
         self.diqa = Diqa(self.base_model_name, custom=custom)
         self.diqa._build()
 
-    def loadweights(self, load_model: str):
-        filename = self.objective_wts_filename if load_model == ModelType.objective else self.final_wts_filename
+        self.trainiter = train_iter
+        self.validiter = valid_iter
+
+    def loadweights(self, pretrained_model_name: str):
+        filename = (self.objective_wts_filename if pretrained_model_name == ModelType.objective.value
+                    else self.final_wts_filename)
         model_path = os.path.join(self.model_dir, self.base_model_name, filename)
         assert os.path.exists(model_path), FileNotFoundError("Objective Model file not found")
-        if load_model == ModelType.objective:
+        if pretrained_model_name == ModelType.objective.value:
             self.diqa.objective.load_weights(model_path)
         else:
             self.diqa.subjective.load_weights(model_path)
-
-    @abstractmethod
-    def train_subjective(self, model: tf.keras.Model):
-        """
-        Train Subjective Model
-        ------------------------
-        """
-        raise NotImplemented
-
-    @abstractmethod
-    def train_objective(self, model: tf.keras.Model):
-        """
-        Train objective Model
-        ------------------------
-        For the custom training loop, it is necessary to:
-
-        1. Define a metric to measure the performance of the model.
-        2. Calculate the loss and the gradients.
-        3. Use the optimizer to update the weights.
-        4. Print the accuracy.
-
-        Args:
-            model ([type]): [description]
-
-        Raises:
-            NotImplemented: [description]
-        """
-        raise NotImplemented
-
-
-class Train(Trainer):
-
-    def __init__(
-        self,
-        train_iter: Union[Iterator, tf.data.Dataset],
-        valid_iter: Union[Iterator, tf.data.Dataset] = None,
-        model_dir: Optional[str] = None,
-        final_wts_filename: Optional[str] = None,
-        objective_wts_filename: Optional[str] = None,
-        epochs: int = 5, batch_size: int = 16,
-        multiprocessing_data_load: bool = False,
-        extra_epochs: int = 1, num_workers_data_load: int = 1,
-        use_pretrained: bool = False,
-        log_dir: str = 'logs',
-        custom: bool = False,
-        verbose: bool = False,
-        **kwargs
-    ):
-        super().__init__(
-            model_dir=model_dir,
-            final_wts_filename=final_wts_filename,
-            objective_wts_filename=objective_wts_filename,
-            epochs=epochs,
-            batch_size=batch_size,
-            extra_epochs=extra_epochs,
-            multiprocessing_data_load=multiprocessing_data_load,
-            num_workers_data_load=num_workers_data_load,
-            use_pretrained=use_pretrained,
-            log_dir=log_dir, custom=custom, verbose=verbose,
-            **kwargs
-        )
-        self.trainiter = train_iter
-        self.validiter = valid_iter
 
     def train_objective(self, model: tf.keras.Model):
 

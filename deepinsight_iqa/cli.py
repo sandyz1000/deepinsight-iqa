@@ -60,14 +60,14 @@ def parse_config(job_dir, config_file):
               default=os.getcwd())
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
-@click.option('-p', '--load_model', show_choices=TRAINING_MODELS,
+@click.option('-p', '--pretrained_model_name', show_choices=TRAINING_MODELS,
               type=str, help='Set pretrained to start training using pretrained n/w',
               default=None)
-def train(algo, train_model, conf_file, base_dir, input_file, image_dir, load_model=None):
+def train(algo, train_model, conf_file, base_dir, input_file, image_dir, pretrained_model_name=None):
     cfg = parse_config(base_dir, conf_file)
 
     def _train_diqa():
-        from deepinsight_iqa.diqa.train import Train
+        from deepinsight_iqa.diqa.train import Trainer
         from deepinsight_iqa.diqa.data import get_combine_datagen, get_iqa_datagen
         from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 
@@ -85,9 +85,9 @@ def train(algo, train_model, conf_file, base_dir, input_file, image_dir, load_mo
                 image_preprocess=image_preprocess, input_size=cfg.pop('input_size'), **cfg
             )
 
-        trainer = Train(train_tfds, valid_iter=valid_tfds, **cfg)
-        if load_model:
-            trainer.loadweights(load_model)
+        trainer = Trainer(train_tfds, valid_iter=valid_tfds, **cfg)
+        if pretrained_model_name:
+            trainer.loadweights(pretrained_model_name)
         
         obj_trainer = partial(trainer.train_objective, trainer.diqa.objective)
         sub_trainer = partial(trainer.train_subjective, trainer.diqa.subjective)
