@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 requirements = [
     "numpy",
@@ -27,9 +27,17 @@ setup(
     long_description_content_type="text/markdown",
     author="Sandip Dey",
     author_email="sandip.dey1988@yahoo.com",
-    packages=['deepinsight_iqa'],
     include_package_data=True,
+    packages=find_packages(include=['deepinsight_iqa*']),
     install_requires=requirements,
-    platforms=["linux", "unix"],
-    python_requires=">3.7.5",
+    classifiers=[
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Intended Audience :: Science/Research",
+        "Operating System :: POSIX :: Linux",
+        "License :: OSI Approved :: Apache Software License",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    ],
+    python_requires=">=3.7.5",
 )

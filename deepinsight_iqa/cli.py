@@ -3,7 +3,6 @@ import json
 import click
 import sys
 from functools import partial
-sys.path.append(os.path.realpath(""))
 from deepinsight_iqa.data_pipeline import (TFDatasetType, TFRecordDataset)
 TRAINING_MODELS = ["objective", "subjective"]
 
