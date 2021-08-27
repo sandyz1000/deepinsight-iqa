@@ -32,7 +32,7 @@ scaling_factor = 1 / 32. , input_size = [416, 416], base_model_name = MobileNet
 Installation is easy!
 
 ```
-python setup.py install
+pip install git+https://github.com/sandyz1000/deepinsight-iqa.git
 ```
 
 
@@ -48,5 +48,5 @@ For prediction:
 --------------
 ```
 deepiqa_predict -mdiqa \
--b/root/deepinsight-iqa/ -cconfs/diqa_conf.json -i/root/dataset/live/jp2k/img1.bmp 
+-b/root/deepinsight-iqa/ -cconfs/diqa_mobilenet.json -i/root/dataset/live/jp2k/img1.bmp 
 ```
