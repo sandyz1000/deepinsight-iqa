@@ -88,10 +88,10 @@ class Trainer:
         """
         self.base_model_name = kwargs.pop('base_model_name')
         self.epochs = epochs
-        if not final_wts_filename:
-            final_wts_filename = generate_random_name(batch_size, epochs)
-        self.final_wts_filename = final_wts_filename
-        self.objective_wts_filename = objective_wts_filename
+        self.final_wts_filename = final_wts_filename if final_wts_filename \
+            else generate_random_name(batch_size, epochs)
+        self.objective_wts_filename = objective_wts_filename if objective_wts_filename \
+            else generate_random_name(batch_size, epochs)
         self.model_dir = model_dir
         self.log_dir = log_dir
         self.multiprocessing_data_load = multiprocessing_data_load
@@ -144,7 +144,7 @@ class Trainer:
         train_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'train'))
         test_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'valid'))
 
-        for epoch in tqdm.tqdm(range(self.epochs)):
+        for epoch in tqdm.tqdm(range(self.epochs), bar_format='{desc:<5.5}{percentage:3.0f}%|{bar:10}{r_bar}'):
             train_step_cnt = 0
             for I_d, I_r, mos in self.trainiter:
                 train_step(I_d, I_r)
@@ -186,7 +186,7 @@ class Trainer:
 
         # Save the objective model
         model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_wts_filename)
-        os.makedirs(os.path.basename(model_path), exist_ok=True)
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
 
     def train_subjective(self, model: tf.keras.Model):
@@ -198,14 +198,19 @@ class Trainer:
             save_weights_only=True
         )
 
-        subjective_datagen = (
-            lambda datagen: ((im, mos) for im, _, mos in datagen)
-        )
+        traingen = self.trainiter
+        validgen = self.validiter
+        if isinstance(self.trainiter, tf.data.Dataset):
+            traingen = traingen.map(lambda im, _, mos: (im, mos))
+            validgen = validgen.map(lambda im, _, mos: (im, mos))
+        else:
+            traingen = ((im, mos) for im, _, mos in traingen)
+            validgen = ((im, mos) for im, _, mos in validgen)
 
         model.fit(
-            subjective_datagen(self.trainiter),
+            traingen,
             steps_per_epoch=self.steps_per_epoch,
-            validation_data=subjective_datagen(self.validiter),
+            validation_data=validgen,
             validation_steps=self.validation_steps,
             epochs=self.epochs + self.extra_epochs,
             initial_epoch=self.epochs,
@@ -216,6 +221,6 @@ class Trainer:
         )
         # Save the subjective model
         model_path = os.path.join(self.model_dir, self.base_model_name, self.final_wts_filename)
-        os.makedirs(os.path.basename(model_path), exist_ok=True)
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
         K.clear_session()

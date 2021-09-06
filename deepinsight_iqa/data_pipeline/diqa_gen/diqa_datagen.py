@@ -522,8 +522,6 @@ def get_tfdataset(
     Returns:
         [tf.data.Dataset]: [description]
     """
-    output_shape = ([None, *input_size, channel_dim], [None, *input_size, channel_dim], [None]),
-    output_type = (tf.float32, tf.float32, tf.float32)
     image_gen = partial(
         generator_fn,
         image_dir,
@@ -540,7 +538,8 @@ def get_tfdataset(
     AUTOTUNE = tf.data.experimental.AUTOTUNE
     train_ds = tf.data.Dataset.from_generator(
         image_gen,
-        output_types=output_type, output_shapes=output_shape
+        output_types=(tf.float32, tf.float32, tf.float32), 
+        output_shapes=([None, *input_size, channel_dim], [None, *input_size, channel_dim], [None]),
     )
     if is_training:
         train_ds = train_ds.repeat()
