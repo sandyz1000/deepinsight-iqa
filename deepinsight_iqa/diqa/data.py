@@ -19,7 +19,8 @@ def get_combine_datagen(
     do_augment=False,
     batch_size=8, **kwargs
 ):
-    df = pd.read_csv(os.path.join(image_dir, csv_path))
+    assert os.path.exists(csv_path), FileNotFoundError("Csv/Json file not found") 
+    df = pd.read_csv(csv_path)
     samples_train, samples_test = df.iloc[:int(len(df) * 0.7), ].to_numpy(), df.iloc[int(len(df) * 0.7):, ].to_numpy()
 
     train_tfdataset, train_steps = diqa_datagen.get_tfdataset(
@@ -57,9 +58,8 @@ def get_iqa_datagen(
     }
 
     assert dataset_type in _DATAGEN_MAPPING.keys(), "Invalid dataset_type, unable to use generator"
-    csv_path = os.path.join(image_dir, csv_path)
     assert os.path.splitext(csv_path)[-1] == '.csv' and os.path.exists(csv_path), \
-        "Not a valid file extension"
+        FileNotFoundError("Csv/Json file not found or not a valid file ext") 
 
     df = pd.read_csv(csv_path)
     samples_train, samples_test = df.iloc[:int(len(df) * 0.7), ], df.iloc[int(len(df) * 0.7):, ]

@@ -1,0 +1,11 @@
+numpy
+tensorflow
+opencv-python
+pandas
+matplotlib
+Pillow
+scikit-learn
+scikit-image
+imgaug
+click
+tensorflow_datasets

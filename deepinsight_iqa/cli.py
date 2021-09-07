@@ -57,6 +57,7 @@ def _train_diqa(cfg, image_dir, input_file, pretrained_model_name=None, train_mo
 
     dataset_type = cfg.pop('dataset_type', None)
     # NOTE: Based on dataset_type init the corresponding datagenerator
+    input_file = input_file if os.path.exists(input_file) else os.path.join(image_dir, input_file)
     if dataset_type:
         train_tfds, valid_tfds = get_iqa_datagen(
             image_dir, input_file, dataset_type,

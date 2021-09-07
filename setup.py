@@ -1,15 +1,6 @@
 from setuptools import setup, find_packages
 
-requirements = [
-    "numpy",
-    "tensorflow",
-    "opencv-python",
-    "matplotlib",
-    "Pillow",
-    "scikit-learn",
-    "click",
-    "tensorflow_datasets"
-]
+requirements = [package.strip() for package in open("requirements-colab.txt", 'r').readlines()]
 setup(
     name="deepinsight-iqa",
     entry_points={
