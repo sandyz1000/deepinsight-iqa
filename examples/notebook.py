@@ -7,7 +7,7 @@ import cv2
 import json
 import tensorflow as tf
 sys.path.append(os.path.realpath(os.pardir))
-from deepinsight_iqa.diqa.data import get_combine_datagen
+from deepinsight_iqa.diqa.data import get_iqa_combined_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_normalization, image_preprocess
 
 
@@ -25,7 +25,7 @@ job_dir = os.path.realpath(os.path.pardir)
 image_dir, csv_path = "/Users/sdey/Documents/dataset/image-quality-assesement", "combine.csv"
 config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_mobilenet.json"))
 cfg = parse_config(job_dir, config_file)
-train, valid = get_combine_datagen(
+train, valid = get_iqa_combined_datagen(
     image_dir, csv_path, do_augment=cfg['use_augmentation'],
     image_preprocess=image_preprocess, input_size=cfg['input_size']
 )
