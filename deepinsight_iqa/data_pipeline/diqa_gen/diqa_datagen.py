@@ -503,7 +503,7 @@ def get_tfdataset(
     input_size: Tuple[int] = (256, 256),
     img_crop_dims: Tuple[int] = (224, 224),
     shuffle: bool = False, do_augment: bool = False, channel_dim: int = 3,
-    is_training=True, **kwargs
+    is_training=True
 ) -> tf.data.Dataset:
     """Function to convert Keras Sequence to tensorflow dataset
 
@@ -531,7 +531,6 @@ def get_tfdataset(
         img_crop_dims=img_crop_dims,
         batch_size=batch_size,
         shuffle=shuffle, do_augment=do_augment, channel_dim=channel_dim,
-        **kwargs
     )
 
     steps_per_epoch = np.floor(len(samples) / batch_size)

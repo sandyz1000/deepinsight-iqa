@@ -198,23 +198,28 @@ class Trainer:
             save_weights_only=True
         )
 
-        traingen = self.train_datagen
-        validgen = self.valid_datagen
+        train_datagen = self.train_datagen
+        valid_datagen = self.valid_datagen
         if isinstance(self.train_datagen, tf.data.Dataset):
-            traingen = traingen.map(lambda im, _, mos: (im, mos))
-            validgen = validgen.map(lambda im, _, mos: (im, mos))
+            train_datagen = train_datagen.map(
+                lambda im, _, mos: (im, mos),
+                num_parallel_calls=tf.data.experimental.AUTOTUNE
+            )
+            valid_datagen = valid_datagen.map(
+                lambda im, _, mos: (im, mos),
+                num_parallel_calls=tf.data.experimental.AUTOTUNE
+            )
         else:
-            traingen = ((im, mos) for im, _, mos in traingen)
-            validgen = ((im, mos) for im, _, mos in validgen)
+            train_datagen = ((im, mos) for im, _, mos in train_datagen)
+            valid_datagen = ((im, mos) for im, _, mos in valid_datagen)
 
         model.fit(
-            traingen,
+            train_datagen,
+            validation_data=valid_datagen,
             steps_per_epoch=self.steps_per_epoch,
-            validation_data=validgen,
             validation_steps=self.validation_steps,
             epochs=self.epochs + self.extra_epochs,
             initial_epoch=self.epochs,
-            verbose=1,
             use_multiprocessing=self.multiprocessing_data_load,
             workers=self.num_workers_data_load,
             callbacks=[model_checkpointer]

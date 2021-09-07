@@ -16,29 +16,35 @@ logger.addHandler(stdout_handler)
 def get_combine_datagen(
     image_dir: str, csv_path: str,
     image_preprocess: Callable = None,
-    do_augment=False,
-    batch_size=8, **kwargs
+    do_augment=False, input_size=(256, 256), batch_size=8, channel_dim=3
 ):
-    assert os.path.exists(csv_path), FileNotFoundError("Csv/Json file not found") 
+    assert os.path.exists(csv_path), FileNotFoundError("Csv/Json file not found")
     df = pd.read_csv(csv_path)
     samples_train, samples_test = df.iloc[:int(len(df) * 0.7), ].to_numpy(), df.iloc[int(len(df) * 0.7):, ].to_numpy()
 
     train_tfdataset, train_steps = diqa_datagen.get_tfdataset(
-        image_dir, samples_train,
+        image_dir,
+        samples_train,
         generator_fn=diqa_datagen.get_deepiqa_datagenerator,
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
-        is_training=True, **kwargs
+        input_size=input_size,
+        channel_dim=channel_dim,
+        shuffle=True,
+        is_training=True,
     )
 
     valid_tfdataset, valid_steps = diqa_datagen.get_tfdataset(
-        image_dir, samples_test,
+        image_dir, 
+        samples_test,
         generator_fn=diqa_datagen.get_deepiqa_datagenerator,
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
-        is_training=False, **kwargs
+        input_size=input_size,
+        channel_dim=channel_dim,
+        is_training=False,
     )
     logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
     return train_tfdataset, valid_tfdataset
@@ -47,8 +53,7 @@ def get_combine_datagen(
 def get_iqa_datagen(
     image_dir: str, csv_path: str, dataset_type: str,
     image_preprocess: Callable = None,
-    do_augment=False,
-    batch_size=8, **kwargs
+    do_augment=False, input_size=(256, 256), batch_size=8, channel_dim=3
 ):
     _DATAGEN_MAPPING = {
         "tid2013": diqa_datagen.TID2013DataRowParser,
@@ -73,8 +78,9 @@ def get_iqa_datagen(
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
+        input_size=input_size,
+        channel_dim=channel_dim,
         shuffle=True,
-        **kwargs
     )
 
     valid_tfds, valid_steps = diqa_datagen.get_tfdataset(
@@ -84,8 +90,9 @@ def get_iqa_datagen(
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
+        input_size=input_size,
+        channel_dim=channel_dim,
         shuffle=False,
-        **kwargs
     )
     logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
     return train_tfds, valid_tfds

@@ -56,21 +56,27 @@ def _train_diqa(cfg, image_dir, input_file, pretrained_model=None, train_model='
     from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 
     dataset_type = cfg.pop('dataset_type', None)
+    model_dir = cfg.pop('model_dir', 'weights/diqa')
     # NOTE: Based on dataset_type init the corresponding datagenerator
     input_file = input_file if os.path.exists(input_file) else os.path.join(image_dir, input_file)
     if dataset_type:
         train_tfds, valid_tfds = get_iqa_datagen(
             image_dir, input_file, dataset_type,
+            image_preprocess=image_preprocess,
+            input_size=cfg['input_size'],
             do_augment=cfg['use_augmentation'],
-            image_preprocess=image_preprocess, input_size=cfg.pop('input_size'), **cfg
+            channel_dim=cfg['channel_dim'], batch_size=cfg['batch_size']
         )
     else:
         train_tfds, valid_tfds = get_combine_datagen(
-            image_dir, input_file, do_augment=cfg['use_augmentation'],
-            image_preprocess=image_preprocess, input_size=cfg.pop('input_size'), **cfg
+            image_dir, input_file,
+            image_preprocess=image_preprocess,
+            input_size=cfg['input_size'],
+            do_augment=cfg['use_augmentation'],
+            channel_dim=cfg['channel_dim'], batch_size=cfg['batch_size']
         )
 
-    trainer = Trainer(train_tfds, valid_iter=valid_tfds, **cfg)
+    trainer = Trainer(train_tfds, valid_iter=valid_tfds, model_dir=model_dir, **cfg)
     if pretrained_model:
         trainer.loadweights(pretrained_model)
 
