@@ -61,8 +61,8 @@ class Trainer:
 
     def __init__(
         self,
-        train_iter: Union[Iterator, tf.data.Dataset],
-        valid_iter: Union[Iterator, tf.data.Dataset] = None,
+        train_datagen: Union[Iterator, tf.data.Dataset],
+        valid_datagen: Union[Iterator, tf.data.Dataset] = None,
         model_dir: Optional[str] = None,
         final_wts_filename: Optional[str] = None,
         objective_wts_filename: Optional[str] = None,
@@ -105,8 +105,8 @@ class Trainer:
         self.diqa = Diqa(self.base_model_name, custom=custom)
         self.diqa._build()
 
-        self.train_datagen = train_iter
-        self.valid_datagen = valid_iter
+        self.train_datagen = train_datagen
+        self.valid_datagen = valid_datagen
 
     def loadweights(self, pretrained_model_name: str):
         filename = (self.objective_wts_filename if pretrained_model_name == ModelType.objective.value

@@ -368,7 +368,8 @@ def get_deepiqa_datagenerator(
     img_preprocessing: Callable = None,
     input_size: Tuple[int] = (256, 256),
     img_crop_dims: Tuple[int] = (224, 224),
-    shuffle: bool = False, do_augment: bool = False, channel_dim: int = 3, **kwargs
+    shuffle: bool = False, do_augment: bool = False,
+    channel_dim: int = 3, repeat: bool = False
 ):
     """
     Generator that will generate shuffle image for AVA, TID2013 and CSIQ dataset combined
@@ -386,11 +387,10 @@ def get_deepiqa_datagenerator(
 
     Yields:
         [type]: [description]
-    """    
+    """
     if shuffle:
         np.random.shuffle(samples)
-
-    zipped = iter(samples)
+    zipped = itertools.cycle(samples) if repeat else iter(samples)
     # apply_aug = (lambda im: image_aug.augment_img(im, augmentation_name='geometric'))
     apply_aug = _augmentation
     while True:
