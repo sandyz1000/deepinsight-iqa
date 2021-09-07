@@ -29,7 +29,7 @@ def get_combine_datagen(
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
-        **kwargs
+        is_training=True, **kwargs
     )
 
     valid_tfdataset, valid_steps = diqa_datagen.get_tfdataset(
@@ -38,7 +38,7 @@ def get_combine_datagen(
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
         do_augment=do_augment,
-        **kwargs
+        is_training=False, **kwargs
     )
     logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
     return train_tfdataset, valid_tfdataset

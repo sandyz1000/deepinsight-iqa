@@ -105,8 +105,8 @@ class Trainer:
         self.diqa = Diqa(self.base_model_name, custom=custom)
         self.diqa._build()
 
-        self.trainiter = train_iter
-        self.validiter = valid_iter
+        self.train_datagen = train_iter
+        self.valid_datagen = valid_iter
 
     def loadweights(self, pretrained_model_name: str):
         filename = (self.objective_wts_filename if pretrained_model_name == ModelType.objective.value
@@ -146,7 +146,7 @@ class Trainer:
 
         for epoch in tqdm.tqdm(range(self.epochs), bar_format='{desc:<5.5}{percentage:3.0f}%|{bar:10}{r_bar}'):
             train_step_cnt = 0
-            for I_d, I_r, mos in self.trainiter:
+            for I_d, I_r, mos in self.train_datagen:
                 train_step(I_d, I_r)
                 train_step_cnt += 1
                 if train_step_cnt >= self.steps_per_epoch:
@@ -155,9 +155,9 @@ class Trainer:
                 tf.summary.scalar('loss', train_step.loss.result(), step=epoch)
                 tf.summary.scalar('accuracy', train_step.accuracy.result(), step=epoch)
 
-            if self.validiter:
+            if self.valid_datagen:
                 valid_step_cnt = 0
-                for I_d, I_r, mos in self.validiter:
+                for I_d, I_r, mos in self.valid_datagen:
                     valid_step(I_d, I_r)
                     valid_step_cnt += 1
                     if valid_step_cnt >= self.validation_steps:
@@ -167,7 +167,7 @@ class Trainer:
                     tf.summary.scalar('accuracy', valid_step.accuracy.result(), step=epoch)
 
             # tensorboard.on_epoch_end(epoch)
-            if self.validiter:
+            if self.valid_datagen:
                 template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
                 logging.info(template.format(
                     epoch + 1,
@@ -198,9 +198,9 @@ class Trainer:
             save_weights_only=True
         )
 
-        traingen = self.trainiter
-        validgen = self.validiter
-        if isinstance(self.trainiter, tf.data.Dataset):
+        traingen = self.train_datagen
+        validgen = self.valid_datagen
+        if isinstance(self.train_datagen, tf.data.Dataset):
             traingen = traingen.map(lambda im, _, mos: (im, mos))
             validgen = validgen.map(lambda im, _, mos: (im, mos))
         else:

@@ -50,7 +50,7 @@ def parse_config(job_dir, config_file):
     return config
 
 
-def _train_diqa(cfg, image_dir, input_file, pretrained_model_name=None, train_model='all'):
+def _train_diqa(cfg, image_dir, input_file, pretrained_model=None, train_model='all'):
     from deepinsight_iqa.diqa.train import Trainer
     from deepinsight_iqa.diqa.data import get_combine_datagen, get_iqa_datagen
     from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
@@ -71,16 +71,16 @@ def _train_diqa(cfg, image_dir, input_file, pretrained_model_name=None, train_mo
         )
 
     trainer = Trainer(train_tfds, valid_iter=valid_tfds, **cfg)
-    if pretrained_model_name:
-        trainer.loadweights(pretrained_model_name)
-    
+    if pretrained_model:
+        trainer.loadweights(pretrained_model)
+
     obj_trainer = partial(trainer.train_objective, model=trainer.diqa.objective)
     sub_trainer = partial(trainer.train_subjective, model=trainer.diqa.subjective)
     if train_model == "all":
         (func() for func in [obj_trainer, sub_trainer])
     else:
         sub_trainer() if train_model == "subjective" else obj_trainer()
-    
+
     return 0
 
 
@@ -111,7 +111,10 @@ def train(algo, train_model, conf_file, base_dir, input_file, image_dir, pretrai
         _train_nima(cfg, image_dir, base_dir, input_file)
 
     elif algo == "diqa":
-        _train_diqa(cfg, image_dir, input_file, pretrained_model_name, train_model)
+        _train_diqa(
+            cfg, image_dir, input_file,
+            pretrained_model=pretrained_model_name, train_model=train_model
+        )
 
 
 @click.command()
