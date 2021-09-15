@@ -10,7 +10,8 @@ import logging
 import tqdm
 import sys
 import enum
-
+from deepinsight_iqa.common.utility import set_gpu_limit
+# set_gpu_limit(10)
 logger = logging.getLogger(__name__)
 stdout_handler = logging.StreamHandler(sys.stdout)
 stdout_handler.setLevel(logging.INFO)
@@ -18,8 +19,6 @@ stdout_handler.setFormatter(logging.Formatter(
     "%(asctime)s %(name)-12s %(levelname)-8s %(message)s", "%Y-%m-%dT%H:%M:%S"
 ))
 logger.addHandler(stdout_handler)
-
-
 logger.info(
     '__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
         __file__, __name__, str(__package__))
@@ -64,8 +63,8 @@ class Trainer:
         train_datagen: Union[Iterator, tf.data.Dataset],
         valid_datagen: Union[Iterator, tf.data.Dataset] = None,
         model_dir: Optional[str] = None,
-        final_wts_filename: Optional[str] = None,
-        objective_wts_filename: Optional[str] = None,
+        subjective_weightfname: Optional[str] = None,
+        objective_weightfname: Optional[str] = None,
         epochs: int = 5, batch_size: int = 16,
         multiprocessing_data_load: bool = False,
         extra_epochs: int = 1, num_workers_data_load: int = 1,
@@ -88,9 +87,9 @@ class Trainer:
         """
         self.base_model_name = kwargs.pop('base_model_name')
         self.epochs = epochs
-        self.final_wts_filename = final_wts_filename if final_wts_filename \
+        self.subjective_weightfname = subjective_weightfname if subjective_weightfname \
             else generate_random_name(batch_size, epochs)
-        self.objective_wts_filename = objective_wts_filename if objective_wts_filename \
+        self.objective_weightfname = objective_weightfname if objective_weightfname \
             else generate_random_name(batch_size, epochs)
         self.model_dir = model_dir
         self.log_dir = log_dir
@@ -109,8 +108,8 @@ class Trainer:
         self.valid_datagen = valid_datagen
 
     def loadweights(self, pretrained_model_name: str):
-        filename = (self.objective_wts_filename if pretrained_model_name == ModelType.objective.value
-                    else self.final_wts_filename)
+        filename = (self.objective_weightfname if pretrained_model_name == ModelType.objective.value
+                    else self.subjective_weightfname)
         model_path = os.path.join(self.model_dir, self.base_model_name, filename)
         assert os.path.exists(model_path), FileNotFoundError("Objective Model file not found")
         if pretrained_model_name == ModelType.objective.value:
@@ -119,7 +118,7 @@ class Trainer:
             self.diqa.subjective.load_weights(model_path)
 
     def train_objective(self, model: tf.keras.Model):
-
+        # TODO: Convert eager execution with graph
         train_step = TrainerStep(
             model, "train", True,
             optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
@@ -144,7 +143,7 @@ class Trainer:
         train_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'train'))
         test_summary_writer = tf.summary.create_file_writer(os.path.join(self.log_dir, 'valid'))
 
-        for epoch in tqdm.tqdm(range(self.epochs), bar_format='{desc:<5.5}{percentage:3.0f}%|{bar:10}{r_bar}'):
+        for epoch in tqdm.tqdm(range(self.epochs), bar_format='{desc:<5.5}{percentage:3.0f}%|{bar:20}{r_bar}'):
             train_step_cnt = 0
             for I_d, I_r, mos in self.train_datagen:
                 train_step(I_d, I_r)
@@ -185,11 +184,12 @@ class Trainer:
                 )
 
         # Save the objective model
-        model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_wts_filename)
+        model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_weightfname)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
 
     def train_subjective(self, model: tf.keras.Model):
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir)
         model_checkpointer = ModelCheckpoint(
             filepath=self.model_dir,
             monitor='val_loss',
@@ -222,10 +222,52 @@ class Trainer:
             initial_epoch=self.epochs,
             use_multiprocessing=self.multiprocessing_data_load,
             workers=self.num_workers_data_load,
-            callbacks=[model_checkpointer]
+            callbacks=[model_checkpointer, tensorboard_callback]
         )
         # Save the subjective model
-        model_path = os.path.join(self.model_dir, self.base_model_name, self.final_wts_filename)
+        model_path = os.path.join(self.model_dir, self.base_model_name, self.subjective_weightfname)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
         K.clear_session()
+
+
+def train_diqa(cfg, image_dir, input_file, pretrained_model=None, train_model='all'):
+    from functools import partial
+    from deepinsight_iqa.diqa.data import get_iqa_datagen
+    from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
+
+    dataset_type = cfg.pop('dataset_type', None)
+    model_dir = cfg.pop('model_dir', 'weights/diqa')
+    # NOTE: Based on dataset_type init the corresponding datagenerator
+    input_file = input_file if os.path.exists(input_file) else os.path.join(image_dir, input_file)
+    if dataset_type:
+        train_tfds, valid_tfds = get_iqa_datagen(
+            image_dir, input_file, 
+            dataset_type=dataset_type,
+            image_preprocess=image_preprocess,
+            input_size=cfg['input_size'],
+            do_augment=cfg['use_augmentation'],
+            channel_dim=cfg['channel_dim'], batch_size=cfg['batch_size']
+        )
+    else:
+        train_tfds, valid_tfds = get_iqa_datagen(
+            image_dir, input_file,
+            image_preprocess=image_preprocess,
+            input_size=cfg['input_size'],
+            do_augment=cfg['use_augmentation'],
+            channel_dim=cfg['channel_dim'], batch_size=cfg['batch_size']
+        )
+
+    trainer = Trainer(train_tfds, valid_datagen=valid_tfds, model_dir=model_dir, **cfg)
+    if pretrained_model:
+        trainer.loadweights(pretrained_model)
+
+    obj_trainer = partial(trainer.train_objective, model=trainer.diqa.objective)
+    sub_trainer = partial(trainer.train_subjective, model=trainer.diqa.subjective)
+    if train_model == "all":
+        for func in [obj_trainer, sub_trainer]:
+            func()
+    else:
+        sub_trainer() if train_model == "subjective" else obj_trainer()
+
+    return 0

@@ -1,8 +1,8 @@
 {
 	"model_dir": "weights/diqa",
-	"final_wts_filename": "diqa-final-weights.h5",
-	"objective_wts_filename": "objective-diqa-final-weights-epoch-5.h5",
-	"log_dir": "logs", 
+	"subjective_weightfname": "diqa-final-weights.h5",
+	"objective_weightfname": "objective-diqa-final-weights-epoch-5.h5",
+	"log_dir": "logs/resnetv2", 
 	"base_model_name": "InceptionResNetV2",
 	"dataset_type": null,
 	"existing_weights": null,

@@ -6,8 +6,10 @@ from keras.callbacks import ModelCheckpoint
 from sklearn.model_selection import train_test_split
 from ..data_pipeline.nima_gen.nima_datagen import NimaDataGenerator
 from .handlers.model_builder import Nima
+from deepinsight_iqa.common.utility import set_gpu_limit
 from .utils.keras_utils import TensorBoardBatch
 import logging
+# set_gpu_limit(10)
 logger = logging.getLogger(__name__)
 
 logger.info('__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
@@ -116,3 +118,12 @@ class Train:
                                            callbacks=[tensorboard, model_checkpointer])
 
         K.clear_session()
+
+
+def train_nima(cfg, image_dir, base_dir, input_file):
+    import json
+    samples_file = os.path.join(base_dir, input_file)
+    samples = json.load(open(samples_file, 'r'))
+    trainer = Train(samples=samples, job_dir=base_dir, image_dir=image_dir, **cfg)
+    trainer.train()
+    return 0

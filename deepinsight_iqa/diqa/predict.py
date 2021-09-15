@@ -11,6 +11,9 @@ from typing import Union, Tuple
 import cv2
 import six
 from skimage import io
+import glob
+from deepinsight_iqa.data_pipeline.diqa_gen.diqa_datagen import DiqaCombineDataGen
+
 logger = logging.getLogger(__name__)
 from deepinsight_iqa.common.utility import thread_safe_singleton
 
@@ -18,17 +21,29 @@ print('__file__={0:<35} | __name__={1:<20} | __package__={2:<20}'.format(
     __file__, __name__, str(__package__)))
 
 
+def image_dir_to_json(img_dir: str, img_type: str = 'jpg'):
+    img_paths = glob.glob(os.path.join(img_dir, '*.' + img_type))
+
+    samples = []
+    for img_path in img_paths:
+        img_name = os.path.basename(img_path)
+        img_id = img_name.split('.')[0]
+        samples.append({'image_id': img_id, "path": img_name})
+
+    return samples
+
+
 @six.add_metaclass(thread_safe_singleton)
 class Prediction:
     def __init__(
         self,
         model_dir: Optional[str] = None,
-        final_wts_filename: Optional[str] = None,
+        subjective_weightfname: Optional[str] = None,
         base_model_name: str = None,
         custom=False
     ):
         try:
-            model_path = os.path.join(model_dir, base_model_name, final_wts_filename)
+            model_path = os.path.join(model_dir, base_model_name, subjective_weightfname)
             self.diqa = Diqa(base_model_name, custom=custom)
             self.diqa._build()
             self.scoring_model = self.diqa.subjective
@@ -61,3 +76,17 @@ class Prediction:
         logger.info(f"final IQA score is {prediction}")
         return prediction
 
+    def predict_batch(self, img_dir, batch_size=3,):
+        start = perf_counter()
+        samples = image_dir_to_json(img_dir)
+        images = [row['path'] for row in samples]
+        X_data = DiqaCombineDataGen(
+            image_dir=img_dir, samples=images, batch_size=batch_size, img_preprocessing=image_preprocess
+        )
+
+        predictions = self.scoring_model.predict_generator(X_data, workers=1, use_multiprocessing=False, verbose=1)
+        for i, sample in enumerate(samples):
+            sample['score'] = predictions[i]
+        end = perf_counter()
+        logger.debug(f"Predictions on batch of {batch_size} took {end-start} seconds")
+        return samples

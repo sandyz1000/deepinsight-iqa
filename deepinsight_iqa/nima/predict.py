@@ -39,7 +39,7 @@ class Prediction:
             image_dir, samples = image_file_to_json(image_source)
         else:
             image_dir = image_source
-            samples = image_dir_to_json(image_dir, img_type='jpg')
+            samples = image_dir_to_json(image_source, img_type='jpg')
 
         # initialize data generator
         n_classes = 10
@@ -48,7 +48,7 @@ class Prediction:
         sample = {"imgage_id": "img_1"}
         samples.append(sample)
         data_generator = TestDataGenerator(
-            samples, image, batch_size, n_classes,
+            samples, image_dir, batch_size, n_classes,
             self.nima.preprocessing_function(), img_format=img_format
         )
 
