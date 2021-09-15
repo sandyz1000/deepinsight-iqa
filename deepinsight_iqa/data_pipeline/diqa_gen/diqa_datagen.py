@@ -1,4 +1,5 @@
 import itertools
+import typing as tp
 from typing import Tuple, Callable, Dict, List, Union
 import pandas as pd
 from deepinsight_iqa.common import image_aug
@@ -39,6 +40,76 @@ class InvalidParserError(Exception):
     Arguments:
         Exception {[type]} -- [description]
     """
+
+
+def combine_deepiqa_dataset(data_dir: str, csvspathmap: Dict[str, str], output_csv: str) -> None:
+    """ Combine all csv to single csv file that can be used by the data-generator
+    """
+    from functools import partial
+
+    def _tid2013_data_parser(img_dir, *row):
+        """
+        Higher value of MOS (0 - minimal, 9 - maximal) corresponds to higher visual
+        quality of the image.
+
+        Rescale range to the range [0, 1], where 0 denotes the lowest quality (largest perceived distortion).
+        """
+        distorted_image, reference_image, mos = row
+        return (
+            os.path.join(img_dir, distorted_image),
+            os.path.join(img_dir, reference_image),
+            mos / 10
+        )
+
+    def _csiq_data_parser(img_dir, *row):
+        """ The ratings were converted to z-scores, realigned, outliers removed, averaged across subjects,
+        and then normalized to span the range [0, 1], where 1 denotes the lowest quality (largest perceived distortion).
+
+        Subtract dmos from 1 to convert the score to common scale i.e. 0 denotes the lowest quality and vice-versa
+        """
+        image, dst_idx, dst_type, dst_lev, dmos_std, dmos = row
+        dst_type = "".join(dst_type.split())
+        dst_img_path = os.path.join(
+            img_dir, 'dst_imgs', dst_type, f"{image}.{dst_type}.{dst_lev}.png"
+        )
+        ref_img_path = os.path.join(img_dir, 'src_imgs', f"{image}.png")
+
+        return dst_img_path, ref_img_path, 1 - dmos
+
+    def _liveiqa_data_parser(img_dir, *row: Tuple):
+        """
+        Difference Mean Opinion Score (DMOS) value for each distorted image:
+        The raw scores for each subject is the difference scores (between the test and the reference) 
+        and then Z-scores and then scaled and shifted to the full range (1 to 100).
+
+        Rescale range to the range [0, 1] and subtract from 1 to covert it to common scale,
+        where 0 denotes the lowest quality (largest perceived distortion) and vice-versa
+        """
+        distortion, index, distorted_path, reference_path, dmos, dmos_realigned, dmos_realigned_std = row
+        return (
+            os.path.join(img_dir, distorted_path),
+            os.path.join(img_dir, reference_path),
+            1 - (dmos / 100)
+        )
+
+    _FUNC_MAPPING = {
+        "tid2013": _tid2013_data_parser,
+        "csiq": _csiq_data_parser,
+        "live": _liveiqa_data_parser
+    }
+
+    assert set(csvspathmap.keys()) == set(_FUNC_MAPPING.keys()), "Invalid csvpath to function map"
+    cols = ['index', 'distorted_image', 'reference_image', 'mos']
+    dataset = pd.DataFrame(columns=cols)
+    for dataset_name, csvpath in csvspathmap.items():
+        # csv_name = os.path.basename(csvpath)
+        folder_name = os.path.dirname(csvpath)
+        ddf = pd.read_csv(os.path.join(data_dir, csvpath))
+        funcparser = partial(_FUNC_MAPPING[dataset_name], folder_name)
+        current = pd.DataFrame([funcparser(*row) for idx, row in ddf.iterrows()], columns=cols)
+        dataset = dataset.append(current, ignore_index=True)
+    output_csv = os.path.join(data_dir, output_csv)
+    dataset.to_csv(output_csv)
 
 
 @add_metaclass(ABCMeta)
@@ -355,13 +426,98 @@ class AVADataRowParser(DiqaDataGenerator):
         return features, mos_scores, distributions
 
 
-def get_predict_datagenerator(
+class DiqaCombineDataGen(tf.keras.utils.Sequence):
+    def __init__(
+        self,
+        image_dir: str,
+        samples: np.ndarray,
+        batch_size: int = 32,
+        img_preprocessing: Callable = None,
+        input_size: Tuple[int] = (256, 256),
+        img_crop_dims: Tuple[int] = (224, 224),
+        shuffle: bool = False, 
+        do_augment: bool = False,
+        channel_dim: int = 3,
+    ) -> None:
+        """ Predict Generator that will generate batch of images from a folder
 
-):
-    pass
+        Args:
+            image_dir ([type]): [description]
+            samples ([type]): [description]
+            batch_size ([type], optional): [description]. Defaults to 32.
+            img_preprocessing ([type], optional): [description]. Defaults to None.
+            input_size ([type], optional): [description]. Defaults to (256, 256).
+            channel_dim ([type], optional): [description]. Defaults to 3.
+        """
+        self.shuffle = shuffle
+        self.samples = samples
+        self.image_dir = image_dir
+        self.batch_size = batch_size
+        self.img_preprocessing = img_preprocessing
+        self.input_size = input_size
+        self.channel_dim = channel_dim
+        self.img_crop_dims = img_crop_dims
+        self.do_augment = do_augment
+        self.data_generator = self.__train_generator if shuffle else self.__valid_generator
+        self.steps_per_epoch = np.floor(len(self.samples) / self.batch_size)
+        self.on_epoch_end()
+
+    def __len__(self):
+        return int(np.ceil(len(self.samples) / self.batch_size))  # number of batches per epoch
+    
+    def on_epoch_end(self):
+        self.indexes = np.arange(len(self.samples))
+        if self.shuffle:
+            np.random.shuffle(self.indexes)
+    
+    def __getitem__(self, index):
+        batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]  # get batch indexes
+        batch_samples = [self.samples[i] for i in batch_indexes]  # get batch samples
+        return self.data_generator(batch_samples)
+
+    def __train_generator(self, batch_samples):
+        X_dist = []
+        X_ref = []
+        Y = []
+
+        for row in range(batch_samples):
+            _, i_d, i_r, mos_score = row
+            i_d, i_r = [load_image(os.path.join(self.image_dir, im), target_size=self.input_size) for im in [i_d, i_r]]
+
+            if self.img_preprocessing:
+                i_d, i_r = [tf.squeeze(self.img_preprocessing(im), axis=0) for im in [i_d, i_r]]
+
+            i_d, i_r = [
+                tf.tile(im, (1, 1, self.channel_dim)) if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
+                for im in [i_d, i_r]
+            ]
+            if self.do_augment:
+                i_d, i_r = [self.apply_aug(im, rand_crop_dims=self.img_crop_dims) for im in [i_d, i_r]]
+
+            X_dist.append(i_d)
+            X_ref.append(i_r)
+            Y.append(mos_score)
+        
+        X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
+        return X_dist, X_ref, Y
+        
+    def __valid_generator(self, batch_samples):
+        X = []
+        for dist_im in batch_samples:
+            dist_im = load_image(os.path.join(self.image_dir, dist_im), target_size=self.input_size)
+            if self.img_preprocessing:
+                dist_im = tf.squeeze(self.img_preprocessing(dist_im), axis=0)
+
+            dist_im = tf.tile(
+                dist_im, (1, 1, self.channel_dim)
+            ) if self.channel_dim == 3 and dist_im.get_shape()[-1] != 3 else dist_im
+            X.append(dist_im)
+        
+        X = tf.cast(X, dtype=tf.float32)
+        return X
 
 
-def get_deepiqa_datagenerator(
+def get_train_datagenerator(
     image_dir: str,
     samples: np.ndarray,
     batch_size: int = 32,
@@ -369,11 +525,11 @@ def get_deepiqa_datagenerator(
     input_size: Tuple[int] = (256, 256),
     img_crop_dims: Tuple[int] = (224, 224),
     shuffle: bool = False, do_augment: bool = False,
-    channel_dim: int = 3, repeat: bool = False
+    channel_dim: int = 3, repeat: bool = False,
 ):
     """
     Generator that will generate shuffle image for AVA, TID2013 and CSIQ dataset combined
-    
+
     Args:
         image_dir ([type]): [description]
         samples ([type]): [description]
@@ -424,74 +580,46 @@ def get_deepiqa_datagenerator(
         yield X_dist, X_ref, Y
 
 
-def combine_deepiqa_dataset(data_dir: str, csvspathmap: Dict[str, str], output_csv: str) -> None:
-    """ Combine all csv to single csv file that can be used by the data-generator
+def get_eval_datagenerator(
+    image_dir: str,
+    samples: np.ndarray,
+    batch_size: int = 32,
+    img_preprocessing: Callable = None,
+    input_size: Tuple[int] = (256, 256),
+    channel_dim: int = 3,
+):
     """
-    from functools import partial
+    Generator that will generate image for evaluation
 
-    def _tid2013_data_parser(img_dir, *row):
-        """
-        Higher value of MOS (0 - minimal, 9 - maximal) corresponds to higher visual
-        quality of the image.
+    Args:
+        image_dir ([type]): [description]
+        samples ([type]): [description]
+        batch_size ([type], optional): [description]. Defaults to 32.
+        img_preprocessing ([type], optional): [description]. Defaults to None.
+        input_size ([type], optional): [description]. Defaults to (256, 256).
+        channel_dim ([type], optional): [description]. Defaults to 3.
 
-        Rescale range to the range [0, 1], where 0 denotes the lowest quality (largest perceived distortion).
-        """
-        distorted_image, reference_image, mos = row
-        return (
-            os.path.join(img_dir, distorted_image),
-            os.path.join(img_dir, reference_image),
-            mos / 10
-        )
+    Yields:
+        [type]: [description]
+    """
+    zipped = iter(samples)
+    while True:
+        X_dist = []
+        for _ in range(batch_size):
+            try:
+                i_d = next(zipped)
+                i_d = load_image(os.path.join(image_dir, i_d), target_size=input_size)
 
-    def _csiq_data_parser(img_dir, *row):
-        """ The ratings were converted to z-scores, realigned, outliers removed, averaged across subjects,
-        and then normalized to span the range [0, 1], where 1 denotes the lowest quality (largest perceived distortion).
+                if img_preprocessing:
+                    i_d = tf.squeeze(img_preprocessing(i_d), axis=0)
 
-        Subtract dmos from 1 to convert the score to common scale i.e. 0 denotes the lowest quality and vice-versa
-        """
-        image, dst_idx, dst_type, dst_lev, dmos_std, dmos = row
-        dst_type = "".join(dst_type.split())
-        dst_img_path = os.path.join(
-            img_dir, 'dst_imgs', dst_type, f"{image}.{dst_type}.{dst_lev}.png"
-        )
-        ref_img_path = os.path.join(img_dir, 'src_imgs', f"{image}.png")
+                i_d = tf.tile(i_d, (1, 1, channel_dim)) if channel_dim == 3 and i_d.get_shape()[-1] != 3 else i_d
+                
+                X_dist.append(i_d)
+            except StopIteration:
+                break
 
-        return dst_img_path, ref_img_path, 1 - dmos
-
-    def _liveiqa_data_parser(img_dir, *row: Tuple):
-        """
-        Difference Mean Opinion Score (DMOS) value for each distorted image:
-        The raw scores for each subject is the difference scores (between the test and the reference) 
-        and then Z-scores and then scaled and shifted to the full range (1 to 100).
-
-        Rescale range to the range [0, 1] and subtract from 1 to covert it to common scale,
-        where 0 denotes the lowest quality (largest perceived distortion) and vice-versa
-        """
-        distortion, index, distorted_path, reference_path, dmos, dmos_realigned, dmos_realigned_std = row
-        return (
-            os.path.join(img_dir, distorted_path),
-            os.path.join(img_dir, reference_path),
-            1 - (dmos / 100)
-        )
-
-    _FUNC_MAPPING = {
-        "tid2013": _tid2013_data_parser,
-        "csiq": _csiq_data_parser,
-        "live": _liveiqa_data_parser
-    }
-
-    assert set(csvspathmap.keys()) == set(_FUNC_MAPPING.keys()), "Invalid csvpath to function map"
-    cols = ['index', 'distorted_image', 'reference_image', 'mos']
-    dataset = pd.DataFrame(columns=cols)
-    for dataset_name, csvpath in csvspathmap.items():
-        # csv_name = os.path.basename(csvpath)
-        folder_name = os.path.dirname(csvpath)
-        ddf = pd.read_csv(os.path.join(data_dir, csvpath))
-        funcparser = partial(_FUNC_MAPPING[dataset_name], folder_name)
-        current = pd.DataFrame([funcparser(*row) for idx, row in ddf.iterrows()], columns=cols)
-        dataset = dataset.append(current, ignore_index=True)
-    output_csv = os.path.join(data_dir, output_csv)
-    dataset.to_csv(output_csv)
+        yield tf.cast(X_dist, dtype=tf.float32)
 
 
 def get_tfdataset(
@@ -503,7 +631,6 @@ def get_tfdataset(
     input_size: Tuple[int] = (256, 256),
     img_crop_dims: Tuple[int] = (224, 224),
     shuffle: bool = False, do_augment: bool = False, channel_dim: int = 3,
-    is_training=True
 ) -> tf.data.Dataset:
     """Function to convert Keras Sequence to tensorflow dataset
 
@@ -522,6 +649,7 @@ def get_tfdataset(
     Returns:
         [tf.data.Dataset]: [description]
     """
+    
     image_gen = partial(
         generator_fn,
         image_dir,
@@ -530,17 +658,92 @@ def get_tfdataset(
         input_size=input_size,
         img_crop_dims=img_crop_dims,
         batch_size=batch_size,
+        repeat=True,
         shuffle=shuffle, do_augment=do_augment, channel_dim=channel_dim,
     )
 
     steps_per_epoch = np.floor(len(samples) / batch_size)
     AUTOTUNE = tf.data.experimental.AUTOTUNE
-    train_ds = tf.data.Dataset.from_generator(
-        image_gen,
-        output_types=(tf.float32, tf.float32, tf.float32), 
-        output_shapes=([None, *input_size, channel_dim], [None, *input_size, channel_dim], [None]),
+    if shuffle:
+        dataset = tf.data.Dataset.from_generator(
+            image_gen,
+            output_types=(tf.float32, tf.float32, tf.float32),
+            output_shapes=([None, *input_size, channel_dim], [None, *input_size, channel_dim], [None]),
+        )
+    else:
+        dataset = tf.data.Dataset.from_generator(
+            image_gen,
+            output_types=(tf.float32, ),
+            output_shapes=([None, *input_size, channel_dim], ),
+        )
+
+    dataset = dataset.prefetch(buffer_size=AUTOTUNE)
+    return dataset, steps_per_epoch
+
+    
+def get_tfds_v2(
+    image_dir: str,
+    samples: Union[np.ndarray, pd.DataFrame],
+    batch_size: int = 32,
+    generator_fn: Callable = None,
+    output_types: Tuple = None,
+    output_shapes: Tuple = None,
+    img_preprocessing: Callable = None,
+    input_size: Tuple[int] = (256, 256),
+    img_crop_dims: Tuple[int] = (224, 224),
+    shuffle: bool = False, epochs: int = 300,
+    do_augment: bool = False, channel_dim: int = 3,
+):
+    steps_per_epoch = np.floor(len(samples) / batch_size)
+    
+    image_gen = generator_fn(
+        image_dir,
+        samples,
+        img_preprocessing=img_preprocessing,
+        input_size=input_size,
+        img_crop_dims=img_crop_dims,
+        batch_size=batch_size,
+        shuffle=shuffle, do_augment=do_augment, channel_dim=channel_dim,
     )
-    if is_training:
-        train_ds = train_ds.repeat()
-    train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
-    return train_ds, steps_per_epoch
+    AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+    def _ds_from_sequence(func, output_types, output_shapes):
+        """
+        Dataset From Sequence Class Eager Context
+
+        Args:
+            func ([type]): [description]
+        """
+        def _wrapper(batch_idx):
+            # Use a tf.py_function to prevent auto-graph from compiling the method
+            tensors = tf.py_function(func, inp=[batch_idx], Tout=output_types)
+            # set the shape of the tensors - assuming channels last
+            return [tensors[idx].set_shape(shape) for idx, shape in enumerate(output_shapes)]
+        return _wrapper
+
+    @_ds_from_sequence(output_types=output_types, output_shapes=output_shapes,)
+    def train_batch_from_sequence(batch_idx):
+        batch_idx = batch_idx.numpy()
+        # zero-based index for what batch of data to load; i.e. goes to 0 at stepsPerEpoch and starts cound over
+        zeroBatch = batch_idx % steps_per_epoch
+        X_ref, X_dst, score = image_gen[zeroBatch]
+        return X_ref, X_dst, score
+
+    @_ds_from_sequence(output_types=output_types, output_shapes=output_shapes,)
+    def valid_batch_from_sequence(batch_idx):
+        batch_idx = batch_idx.numpy()
+        # zero-based index for what batch of data to load; 
+        # i.e. goes to 0 at stepsPerEpoch and starts cound over
+        zeroBatch = batch_idx % steps_per_epoch
+        X_dst = image_gen[zeroBatch]
+        return X_dst
+
+    # create our data set for how many total steps of training we have
+    dataset = tf.data.Dataset.range(steps_per_epoch * epochs)
+    dataset.map(
+        train_batch_from_sequence if shuffle else valid_batch_from_sequence, 
+        num_parallel_calls=tf.data.experimental.AUTOTUNE
+    )
+
+    dataset = dataset.prefetch(buffer_size=AUTOTUNE)
+    return dataset, steps_per_epoch
