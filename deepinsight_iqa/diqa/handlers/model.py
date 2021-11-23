@@ -6,14 +6,22 @@ import tensorflow.keras.applications as KA
 class Diqa(object):
     def __init__(self, base_model_name, custom=False) -> None:
         # Initialize objective model for training
-        self.objective_net = ObjectiveNetwork(base_model_name, custom=custom)
-        self.subjective_net = SubjectiveNetwork()
-        self.subjective = None
-        self.objective = None
+        self.__objective_network = ObjectiveNetwork(base_model_name, custom=custom)
+        self.__subjective_network = SubjectiveNetwork()
+        self.__subjective_model = None
+        self.__objective_model = None
+
+    @property
+    def subjective(self):
+        return self.__subjective_model
+
+    @property
+    def objective(self):
+        return self.__objective_model
 
     def _build(self):
-        self.objective = self.objective_net().model
-        self.subjective = self.subjective_net(
+        self.__objective_model = self.__objective_network().model
+        self.__subjective_model = self.__subjective_network(
             self.objective.input, 
             self.objective.get_layer('bottleneck').output
         ).model

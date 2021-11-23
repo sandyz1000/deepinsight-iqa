@@ -435,7 +435,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         img_preprocessing: Callable = None,
         input_size: Tuple[int] = (256, 256),
         img_crop_dims: Tuple[int] = (224, 224),
-        shuffle: bool = False, 
+        shuffle: bool = False,
         do_augment: bool = False,
         channel_dim: int = 3,
     ) -> None:
@@ -464,12 +464,12 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
 
     def __len__(self):
         return int(np.ceil(len(self.samples) / self.batch_size))  # number of batches per epoch
-    
+
     def on_epoch_end(self):
         self.indexes = np.arange(len(self.samples))
         if self.shuffle:
             np.random.shuffle(self.indexes)
-    
+
     def __getitem__(self, index):
         batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]  # get batch indexes
         batch_samples = [self.samples[i] for i in batch_indexes]  # get batch samples
@@ -497,10 +497,10 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
             X_dist.append(i_d)
             X_ref.append(i_r)
             Y.append(mos_score)
-        
+
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
         return X_dist, X_ref, Y
-        
+
     def __valid_generator(self, batch_samples):
         X = []
         for dist_im in batch_samples:
@@ -512,63 +512,88 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
                 dist_im, (1, 1, self.channel_dim)
             ) if self.channel_dim == 3 and dist_im.get_shape()[-1] != 3 else dist_im
             X.append(dist_im)
-        
+
         X = tf.cast(X, dtype=tf.float32)
         return X
 
 
-def get_train_datagenerator(
-    image_dir: str,
-    samples: np.ndarray,
-    batch_size: int = 32,
-    img_preprocessing: Callable = None,
-    input_size: Tuple[int] = (256, 256),
-    img_crop_dims: Tuple[int] = (224, 224),
-    shuffle: bool = False, do_augment: bool = False,
-    channel_dim: int = 3, repeat: bool = False,
-):
-    """
-    Generator that will generate shuffle image for AVA, TID2013 and CSIQ dataset combined
+class get_train_datagenerator:
+    def __init__(
+        self,
+        image_dir: str,
+        samples: np.ndarray,
+        batch_size: int = 32,
+        img_preprocessing: Callable = None,
+        input_size: Tuple[int] = (256, 256),
+        img_crop_dims: Tuple[int] = (224, 224),
+        shuffle: bool = False,
+        do_augment: bool = False,
+        channel_dim: int = 3, repeat: bool = False,
+    ):
+        """
+        Generator that will generate shuffle image for AVA, TID2013 and CSIQ dataset combined
 
-    Args:
-        image_dir ([type]): [description]
-        samples ([type]): [description]
-        batch_size ([type], optional): [description]. Defaults to 32.
-        img_preprocessing ([type], optional): [description]. Defaults to None.
-        input_size ([type], optional): [description]. Defaults to (256, 256).
-        img_crop_dims ([type], optional): [description]. Defaults to (224, 224).
-        shuffle ([type], optional): [description]. Defaults to False.
-        do_augment ([type], optional): [description]. Defaults to False.
-        channel_dim ([type], optional): [description]. Defaults to 3.
+        Args:
+            image_dir ([type]): [description]
+            samples ([type]): [description]
+            batch_size ([type], optional): [description]. Defaults to 32.
+            img_preprocessing ([type], optional): [description]. Defaults to None.
+            input_size ([type], optional): [description]. Defaults to (256, 256).
+            img_crop_dims ([type], optional): [description]. Defaults to (224, 224).
+            shuffle ([type], optional): [description]. Defaults to False.
+            do_augment ([type], optional): [description]. Defaults to False.
+            channel_dim ([type], optional): [description]. Defaults to 3.
 
-    Yields:
-        [type]: [description]
-    """
-    if shuffle:
-        np.random.shuffle(samples)
-    zipped = itertools.cycle(samples) if repeat else iter(samples)
-    # apply_aug = (lambda im: image_aug.augment_img(im, augmentation_name='geometric'))
-    apply_aug = _augmentation
-    while True:
+        Yields:
+            [type]: [description]
+        """
+        self.image_dir = image_dir
+        self.batch_size = batch_size
+        self.channel_dim = channel_dim
+        self.input_size = input_size
+        self.do_augment = do_augment
+        self.img_preprocessing = img_preprocessing
+        self.img_crop_dims = img_crop_dims
+
+        if shuffle:
+            np.random.shuffle(samples)
+        self.zipped = itertools.cycle(samples) if repeat else iter(samples)
+        # apply_aug = (lambda im: image_aug.augment_img(im, augmentation_name='geometric'))
+        self.apply_aug = _augmentation
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
         X_dist = []
         X_ref = []
         Y = []
 
-        for _ in range(batch_size):
+        for _ in range(self.batch_size):
             try:
-                row = next(zipped)
+                row = next(self.zipped)
                 _, i_d, i_r, mos_score = row
-                i_d, i_r = [load_image(os.path.join(image_dir, im), target_size=input_size) for im in [i_d, i_r]]
-
-                if img_preprocessing:
-                    i_d, i_r = [tf.squeeze(img_preprocessing(im), axis=0) for im in [i_d, i_r]]
-
                 i_d, i_r = [
-                    tf.tile(im, (1, 1, channel_dim)) if channel_dim == 3 and im.get_shape()[-1] != 3 else im
+                    load_image(os.path.join(self.image_dir, im), target_size=self.input_size)
                     for im in [i_d, i_r]
                 ]
-                if do_augment:
-                    i_d, i_r = [apply_aug(im, rand_crop_dims=img_crop_dims) for im in [i_d, i_r]]
+
+                if self.img_preprocessing:
+                    i_d, i_r = [
+                        tf.squeeze(self.img_preprocessing(im), axis=0)
+                        for im in [i_d, i_r]
+                    ]
+
+                i_d, i_r = [
+                    tf.tile(im, (1, 1, self.channel_dim))
+                    if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
+                    for im in [i_d, i_r]
+                ]
+                if self.do_augment:
+                    i_d, i_r = [
+                        self.apply_aug(im, rand_crop_dims=self.img_crop_dims)
+                        for im in [i_d, i_r]
+                    ]
 
                 X_dist.append(i_d)
                 X_ref.append(i_r)
@@ -577,49 +602,62 @@ def get_train_datagenerator(
                 break
 
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
-        yield X_dist, X_ref, Y
+        return X_dist, X_ref, Y
 
 
-def get_eval_datagenerator(
-    image_dir: str,
-    samples: np.ndarray,
-    batch_size: int = 32,
-    img_preprocessing: Callable = None,
-    input_size: Tuple[int] = (256, 256),
-    channel_dim: int = 3,
-):
-    """
-    Generator that will generate image for evaluation
+class get_eval_datagenerator:
+    def __init__(
+        self,
+        image_dir: str,
+        samples: np.ndarray,
+        batch_size: int = 32,
+        img_preprocessing: Callable = None,
+        input_size: Tuple[int] = (256, 256),
+        channel_dim: int = 3,
+    ):
+        """
+        Generator that will generate image for evaluation
 
-    Args:
-        image_dir ([type]): [description]
-        samples ([type]): [description]
-        batch_size ([type], optional): [description]. Defaults to 32.
-        img_preprocessing ([type], optional): [description]. Defaults to None.
-        input_size ([type], optional): [description]. Defaults to (256, 256).
-        channel_dim ([type], optional): [description]. Defaults to 3.
+        Args:
+            image_dir ([type]): [description]
+            samples ([type]): [description]
+            batch_size ([type], optional): [description]. Defaults to 32.
+            img_preprocessing ([type], optional): [description]. Defaults to None.
+            input_size ([type], optional): [description]. Defaults to (256, 256).
+            channel_dim ([type], optional): [description]. Defaults to 3.
 
-    Yields:
-        [type]: [description]
-    """
-    zipped = iter(samples)
-    while True:
+        Yields:
+            [type]: [description]
+        """
+        self.image_dir = image_dir
+        self.img_preprocessing = img_preprocessing
+        self.steps_per_epoch = np.floor(len(samples) / batch_size)
+        self.zipped = itertools.cycle(samples)
+        self.batch_size = batch_size
+        self.channel_dim = channel_dim
+        self.input_size = input_size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
         X_dist = []
-        for _ in range(batch_size):
+        for _ in range(self.batch_size):
             try:
-                i_d = next(zipped)
-                i_d = load_image(os.path.join(image_dir, i_d), target_size=input_size)
+                i_d = next(self.zipped)
+                i_d = load_image(os.path.join(self.image_dir, i_d), target_size=self.input_size)
 
-                if img_preprocessing:
-                    i_d = tf.squeeze(img_preprocessing(i_d), axis=0)
+                if self.img_preprocessing:
+                    i_d = tf.squeeze(self.img_preprocessing(i_d), axis=0)
 
-                i_d = tf.tile(i_d, (1, 1, channel_dim)) if channel_dim == 3 and i_d.get_shape()[-1] != 3 else i_d
-                
+                i_d = tf.tile(i_d, (1, 1, self.channel_dim)) \
+                    if self.channel_dim == 3 and i_d.get_shape()[-1] != 3 else i_d
+
                 X_dist.append(i_d)
             except StopIteration:
                 break
 
-        yield tf.cast(X_dist, dtype=tf.float32)
+        return tf.cast(X_dist, dtype=tf.float32)
 
 
 def get_tfdataset(
@@ -649,7 +687,7 @@ def get_tfdataset(
     Returns:
         [tf.data.Dataset]: [description]
     """
-    
+
     image_gen = partial(
         generator_fn,
         image_dir,
@@ -680,7 +718,7 @@ def get_tfdataset(
     dataset = dataset.prefetch(buffer_size=AUTOTUNE)
     return dataset, steps_per_epoch
 
-    
+
 def get_tfds_v2(
     image_dir: str,
     samples: Union[np.ndarray, pd.DataFrame],
@@ -695,7 +733,7 @@ def get_tfds_v2(
     do_augment: bool = False, channel_dim: int = 3,
 ):
     steps_per_epoch = np.floor(len(samples) / batch_size)
-    
+
     image_gen = generator_fn(
         image_dir,
         samples,
@@ -732,7 +770,7 @@ def get_tfds_v2(
     @_ds_from_sequence(output_types=output_types, output_shapes=output_shapes,)
     def valid_batch_from_sequence(batch_idx):
         batch_idx = batch_idx.numpy()
-        # zero-based index for what batch of data to load; 
+        # zero-based index for what batch of data to load;
         # i.e. goes to 0 at stepsPerEpoch and starts cound over
         zeroBatch = batch_idx % steps_per_epoch
         X_dst = image_gen[zeroBatch]
@@ -741,7 +779,7 @@ def get_tfds_v2(
     # create our data set for how many total steps of training we have
     dataset = tf.data.Dataset.range(steps_per_epoch * epochs)
     dataset.map(
-        train_batch_from_sequence if shuffle else valid_batch_from_sequence, 
+        train_batch_from_sequence if shuffle else valid_batch_from_sequence,
         num_parallel_calls=tf.data.experimental.AUTOTUNE
     )
 

@@ -159,34 +159,50 @@ def get_train_dataset(pairs_txt: str, img_dir_path: str, generator_fn: tf.keras.
     return train_ds, steps_per_epoch, classes
 
 
-def get_nima_datagenerator(samples,
-                           img_dir,
-                           batch_size,
-                           preprocess_func=preprocess_input,
-                           target_size=(256, 256),
-                           img_crop_dims=(224, 224),
-                           normalize_labels=False,
-                           do_augment=False,
-                           shuffle=False,):
-    if shuffle:
-        random.shuffle(samples)
-    zipped = itertools.cycle(samples)
+class get_nima_datagenerator:
+    def __init__(
+        self,
+        samples,
+        img_dir,
+        batch_size,
+        preprocess_func=preprocess_input,
+        target_size=(256, 256),
+        img_crop_dims=(224, 224),
+        normalize_labels=False,
+        do_augment=False,
+        shuffle=False,
+    ):
+        self.batch_size = batch_size
+        self.img_dir = img_dir
+        self.preprocess_func = preprocess_func
+        self.do_augment = do_augment
+        self.normalize_labels = normalize_labels
+        self.target_size = target_size
+        self.img_crop_dims = img_crop_dims
 
-    while True:
+        if shuffle:
+            random.shuffle(samples)
+        self.zipped = itertools.cycle(samples)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
         X = []
         Y = []
 
-        for _ in range(batch_size):
-            row = next(zipped)
-            img_path, label = os.path.join(img_dir, row['image_id']), normalize_labels(row['label'])
-            im1 = np.array(load_image(img_path, target_size), dtype=np.uint8)
+        for _ in range(self.batch_size):
+            row = next(self.zipped)
+            img_path, label = os.path.join(self.img_dir, row['image_id']), 
+            self.normalize_labels(row['label'])
+            im1 = np.array(load_image(img_path, self.target_size), dtype=np.uint8)
 
-            if do_augment:
+            if self.do_augment:
                 im1 = image_aug.augment_img(im1, augmentation_name='geometric')
 
             X.append(im1)
             Y.append(label)
 
-        X, Y = preprocess_func(np.array(X)), np.array(Y)
+        X, Y = self.preprocess_func(np.array(X)), np.array(Y)
 
-        yield X, Y
+        return X, Y
