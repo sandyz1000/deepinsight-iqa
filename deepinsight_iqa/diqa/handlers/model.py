@@ -106,10 +106,28 @@ class Diqa(BaseModel):
         else:
             self.subjective_model.load_weights(model_path)
 
-    def fit(self):
-        # NOTE: Do not call fit method of Diqa instance
-        raise NotImplementedError
+class Diqa(object):
+    def __init__(self, base_model_name, custom=False) -> None:
+        # Initialize objective model for training
+        self.__objective_network = ObjectiveNetwork(base_model_name, custom=custom)
+        self.__subjective_network = SubjectiveNetwork()
+        self.__subjective_model = None
+        self.__objective_model = None
 
+    @property
+    def subjective(self):
+        return self.__subjective_model
+
+    @property
+    def objective(self):
+        return self.__objective_model
+
+    def _build(self):
+        self.__objective_model = self.__objective_network().model
+        self.__subjective_model = self.__subjective_network(
+            self.objective.input, 
+            self.objective.get_layer('bottleneck').output
+        ).model
 
 class ObjectiveModel(KM.Model):
     """

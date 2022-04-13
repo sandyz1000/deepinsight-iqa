@@ -41,7 +41,7 @@ To begin Training the network
 ```
 deepiqa_train -mdiqa \
 -b/root/deepinsight-iqa/ -cconfs/diqa_mobilenet.json -fcombine.csv \
--i/root/dataset --train_model=all --pretrained_model_name=subjective
+-i/root/dataset --train_model=all --pretrained_model=subjective
 ```
 
 For prediction:

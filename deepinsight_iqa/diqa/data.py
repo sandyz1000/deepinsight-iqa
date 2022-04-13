@@ -1,28 +1,33 @@
 import os
 import sys
-import logging
-import pandas as pd
+import tensorflow as tf
 from deepinsight_iqa.data_pipeline.diqa_gen import diqa_datagen
 from deepinsight_iqa.common.utility import get_stream_handler
 from typing import Callable
 logger = logging.getLogger(__name__)
 stdout_handler = get_stream_handler()
 logger.addHandler(stdout_handler)
+_DATAGEN_MAPPING = {
+    "tid2013": diqa_datagen.TID2013DataRowParser,
+    "csiq": diqa_datagen.CSIQDataRowParser,
+    "live": diqa_datagen.LiveDataRowParser,
+    "ava": diqa_datagen.AVADataRowParser
+}
 
 
 def get_iqa_tfds(
-    image_dir: str,
-    csv_path: str,
+    image_dir: str, 
+    csv_path: str, 
     dataset_type: str,
     image_preprocess: Callable = None,
-    do_augment=False,
+    do_augment=False, 
     input_size=(256, 256), batch_size=8, channel_dim=3
 ):
     if dataset_type is None:
         assert os.path.exists(csv_path), FileNotFoundError("Csv/Json file not found")
         df = pd.read_csv(csv_path)
         samples_train, samples_test = (
-            df.iloc[:int(len(df) * 0.7), ].to_numpy(),
+            df.iloc[:int(len(df) * 0.7), ].to_numpy(), 
             df.iloc[int(len(df) * 0.7):, ].to_numpy()
         )
 
@@ -89,52 +94,72 @@ def get_iqa_tfds(
         )
     
     logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
-    return train_tfdataset, valid_tfdataset
+    return train_tfds, valid_tfds
 
 
 def get_iqa_datagen(
-    image_dir: str, csv_path: str, dataset_type: str,
+    image_dir: str, csv_path: str,
+    dataset_type: str = None,
     image_preprocess: Callable = None,
-    do_augment=False,
-    batch_size=8, **kwargs
+    do_augment=False, input_size=(256, 256), batch_size=8, channel_dim=3
 ):
-    _DATAGEN_MAPPING = {
-        "tid2013": diqa_datagen.TID2013DataRowParser,
-        "csiq": diqa_datagen.CSIQDataRowParser,
-        "live": diqa_datagen.LiveDataRowParser,
-        "ava": diqa_datagen.AVADataRowParser
-    }
+    if dataset_type is None:
+        assert os.path.exists(csv_path), FileNotFoundError("Csv/Json file not found")
+        df = pd.read_csv(csv_path)
+        samples_train, samples_test = (
+            df.iloc[:int(len(df) * 0.7), ].to_numpy(),
+            df.iloc[int(len(df) * 0.7):, ].to_numpy()
+        )
+        train_datagen = diqa_datagen.DiqaCombineDataGen(
+            image_dir,
+            samples_train,
+            batch_size=batch_size,
+            img_preprocessing=image_preprocess,
+            do_augment=do_augment,
+            input_size=input_size,
+            channel_dim=channel_dim,
+            shuffle=True
+        )
 
-    assert dataset_type in _DATAGEN_MAPPING.keys(), "Invalid dataset_type, unable to use generator"
-    csv_path = os.path.join(image_dir, csv_path)
-    assert os.path.splitext(csv_path)[-1] == '.csv' and os.path.exists(csv_path), \
-        "Not a valid file extension"
+        valid_datagen = diqa_datagen.DiqaCombineDataGen(
+            image_dir,
+            [dist for _, dist, ref, mos in samples_test],
+            batch_size=batch_size,
+            img_preprocessing=image_preprocess,
+            do_augment=do_augment,
+            input_size=input_size,
+            channel_dim=channel_dim,
+            shuffle=False
+        )
+    else:
+        assert os.path.splitext(csv_path)[-1] == '.csv' and os.path.exists(csv_path), \
+            FileNotFoundError("Csv/Json file not found or not a valid file ext")
 
-    df = pd.read_csv(csv_path)
-    samples_train, samples_test = df.iloc[:int(len(df) * 0.7), ], df.iloc[int(len(df) * 0.7):, ]
+        df = pd.read_csv(csv_path)
+        samples_train, samples_test = df.iloc[:int(len(df) * 0.7), ], df.iloc[int(len(df) * 0.7):, ]
 
-    data_gen_cls = _DATAGEN_MAPPING[dataset_type]
+        data_gen_cls = _DATAGEN_MAPPING[dataset_type]
 
-    train_tfds, train_steps = diqa_datagen.get_tfdataset(
-        image_dir,
-        samples_train,
-        generator_fn=data_gen_cls,
-        batch_size=batch_size,
-        img_preprocessing=image_preprocess,
-        do_augment=do_augment,
-        shuffle=True,
-        **kwargs
-    )
+        train_datagen = data_gen_cls(
+            image_dir,
+            samples_train,
+            batch_size=batch_size,
+            img_preprocessing=image_preprocess,
+            do_augment=do_augment,
+            input_size=input_size,
+            channel_dim=channel_dim,
+            shuffle=True,
+        )
 
-    valid_tfds, valid_steps = diqa_datagen.get_tfdataset(
-        image_dir,
-        samples_test,
-        generator_fn=data_gen_cls,
-        batch_size=batch_size,
-        img_preprocessing=image_preprocess,
-        do_augment=do_augment,
-        shuffle=False,
-        **kwargs
-    )
-    logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
-    return train_tfds, valid_tfds
+        valid_datagen = data_gen_cls(
+            image_dir,
+            [dist for _, dist, ref, mos in samples_test],
+            batch_size=batch_size,
+            img_preprocessing=image_preprocess,
+            do_augment=do_augment,
+            input_size=input_size,
+            channel_dim=channel_dim,
+            shuffle=False,
+        )
+
+    return train_datagen, valid_datagen

@@ -38,7 +38,7 @@ def predict(algo, conf_file, base_dir, image_filepath):
     elif algo == "diqa":
         from deepinsight_iqa.diqa.predict import Prediction
         prediction = Prediction(
-            model_dir=cfg['model_dir'], final_wts_filename=cfg['final_wts_filename'],
+            model_dir=cfg['model_dir'], subjective_weightfname=cfg['subjective_weightfname'],
             base_model_name=cfg['base_model_name']
         )
         score = prediction.predict(image_filepath)
@@ -100,57 +100,17 @@ def train_diqa(cfg, image_dir, input_file, pretrained_model=None, train_model='a
               default=os.getcwd())
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
-@click.option('-p', '--pretrained_model_name', show_choices=TRAINING_MODELS,
+@click.option('-p', '--pretrained_model', show_choices=TRAINING_MODELS,
               type=str, help='Set pretrained to start training using pretrained n/w',
               default=None)
-def train(algo, train_model, conf_file, base_dir, input_file, image_dir, pretrained_model_name=None):
+def train(algo, train_model, conf_file, base_dir, input_file, image_dir, pretrained_model=None):
     cfg = parse_config(base_dir, conf_file)
-
-    def _train_diqa():
-        from deepinsight_iqa.diqa.train import Trainer
-        from deepinsight_iqa.diqa.data import get_combine_datagen, get_iqa_datagen
-        from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
-
-        dataset_type = cfg.pop('dataset_type', None)
-        # NOTE: Based on dataset_type init the corresponding datagenerator
-        if dataset_type:
-            train_tfds, valid_tfds = get_iqa_datagen(
-                image_dir, input_file, dataset_type,
-                do_augment=cfg['use_augmentation'],
-                image_preprocess=image_preprocess, input_size=cfg.pop('input_size'), **cfg
-            )
-        else:
-            train_tfds, valid_tfds = get_combine_datagen(
-                image_dir, input_file, do_augment=cfg['use_augmentation'],
-                image_preprocess=image_preprocess, input_size=cfg.pop('input_size'), **cfg
-            )
-
-        trainer = Trainer(train_tfds, valid_iter=valid_tfds, **cfg)
-        if pretrained_model_name:
-            trainer.loadweights(pretrained_model_name)
-        
-        obj_trainer = partial(trainer.train_objective, trainer.diqa.objective)
-        sub_trainer = partial(trainer.train_subjective, trainer.diqa.subjective)
-        (
-            (func() for func in [obj_trainer, sub_trainer])
-            if train_model == "all" else (
-                sub_trainer() if train_model == "subjective" else obj_trainer())
-        )
-        return 0
-
-    def _train_nima():
-        from deepinsight_iqa.nima.train import Train
-        samples_file = os.path.join(base_dir, input_file)
-        samples = json.load(open(samples_file, 'r'))
-        trainer = Train(samples=samples, job_dir=base_dir, image_dir=image_dir, **cfg)
-        trainer.train()
-        return 0
-
     if algo == "nima":
-        _train_nima()
+        from deepinsight_iqa.nima.train import train_nima
+        train_nima(cfg, image_dir, base_dir, input_file)
 
     elif algo == "diqa":
-        
+        from deepinsight_iqa.diqa.train import train_diqa
         train_diqa(
             cfg, image_dir, input_file,
             pretrained_model=pretrained_model, train_model=train_model
@@ -172,7 +132,7 @@ def evaluate(algo, conf_file, base_dir, input_file, image_dir):
     elif algo == "diqa":
         from deepinsight_iqa.diqa import evals
         from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
-        from deepinsight_iqa.diqa.data import get_combine_datagen, get_iqa_datagen
+        from deepinsight_iqa.diqa.data import get_iqa_combined_datagen, get_iqa_tfds
 
         return 0
 
