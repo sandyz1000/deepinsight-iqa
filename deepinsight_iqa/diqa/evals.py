@@ -31,8 +31,8 @@ class Evaluation:
         self.datagen = data_iter
         df = pd.read_csv(csv_path)
         
-        self.diqa.subjective.load_weights(model_path)
-        self.final_model = self.diqa.subjective
+        self.diqa.subjective_model.load_weights(model_path)
+        self.final_model = self.diqa.subjective_model
 
     def get_image_score_pair(
         self,

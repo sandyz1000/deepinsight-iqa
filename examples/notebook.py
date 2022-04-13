@@ -9,6 +9,9 @@ import tensorflow as tf
 sys.path.append(os.path.realpath(os.pardir))
 from deepinsight_iqa.diqa.data import get_combine_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_normalization, image_preprocess
+from deepinsight_iqa.diqa.predict import Prediction
+from deepinsight_iqa.diqa.trainer import Trainer
+
 
 
 def parse_config(job_dir, config_file):

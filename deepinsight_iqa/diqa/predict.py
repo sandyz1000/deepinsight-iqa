@@ -23,15 +23,14 @@ class Prediction:
     def __init__(
         self,
         model_dir: Optional[str] = None,
-        final_wts_filename: Optional[str] = None,
-        base_model_name: str = None,
-        custom=False
+        subjective_weightfname: Optional[str] = None,
+        base_model_name: str = None
     ):
         try:
-            model_path = os.path.join(model_dir, base_model_name, final_wts_filename)
-            self.diqa = Diqa(base_model_name, custom=custom)
-            self.diqa._build()
-            self.scoring_model = self.diqa.subjective
+            model_path = os.path.join(model_dir, base_model_name, subjective_weightfname)
+            self.diqa = Diqa(base_model_name)
+            # self.diqa.build()
+            self.scoring_model = self.diqa.subjective_model
             self.scoring_model.load_weights(model_path)
         except Exception as e:
             print("Unable to load DIQA model, check model path", str(e))

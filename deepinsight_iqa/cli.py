@@ -2,8 +2,11 @@ import os
 import json
 import click
 import sys
-from functools import partial
 from deepinsight_iqa.data_pipeline import (TFDatasetType, TFRecordDataset)
+from deepinsight_iqa.diqa.data import get_iqa_datagen
+from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
+from deepinsight_iqa.diqa.trainer import Trainer
+from functools import partial
 TRAINING_MODELS = ["objective", "subjective"]
 
 
@@ -50,9 +53,47 @@ def parse_config(job_dir, config_file):
     return config
 
 
+def train_diqa(cfg, image_dir, input_file, pretrained_model=None, train_model='all'):
+    dataset_type = cfg.pop('dataset_type', None)
+    model_dir = cfg.pop('model_dir', 'weights/diqa')
+    # NOTE: Based on dataset_type init the corresponding datagenerator
+    input_file = input_file if os.path.exists(input_file) else os.path.join(image_dir, input_file)
+    if dataset_type:
+        train_tfds, valid_tfds = get_iqa_datagen(
+            image_dir,
+            input_file,
+            dataset_type=dataset_type,
+            image_preprocess=image_preprocess,
+            input_size=cfg['input_size'],
+            do_augment=cfg['use_augmentation'],
+            channel_dim=cfg['channel_dim'],
+            batch_size=cfg['batch_size']
+        )
+    else:
+        train_tfds, valid_tfds = get_iqa_datagen(
+            image_dir,
+            input_file,
+            image_preprocess=image_preprocess,
+            input_size=cfg['input_size'],
+            do_augment=cfg['use_augmentation'],
+            channel_dim=cfg['channel_dim'],
+            batch_size=cfg['batch_size']
+        )
+
+    trainer = Trainer(train_tfds, valid_datagen=valid_tfds, model_dir=model_dir, **cfg)
+    if pretrained_model:
+        trainer.loadweights(pretrained_model)
+    if train_model == "objective":
+        trainer.train_subjective()
+    elif train_model == "subjective":
+        trainer.train_objective()
+
+    return 0
+
+
 @click.command()
 @click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
-@click.option('-t', '--train_model', default='all', show_choices=["all"] + TRAINING_MODELS[:],
+@click.option('-t', '--train_model', default='subjective', show_choices=TRAINING_MODELS[:],
               help="Arguments to mention if network need to be train completely or partially")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
 @click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found',
@@ -109,7 +150,11 @@ def train(algo, train_model, conf_file, base_dir, input_file, image_dir, pretrai
         _train_nima()
 
     elif algo == "diqa":
-        _train_diqa()
+        
+        train_diqa(
+            cfg, image_dir, input_file,
+            pretrained_model=pretrained_model, train_model=train_model
+        )
 
 
 @click.command()

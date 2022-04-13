@@ -6,6 +6,8 @@ import csv
 from skimage import feature
 import matplotlib.pyplot as plt
 from threading import Lock
+import logging
+import sys
 
 
 def plot_image(img_path):
@@ -91,3 +93,12 @@ def set_gpu_limit(limit=2):
             return f"GPU Limit set to: {1024*limit} MB"
         except RuntimeError as e:
             raise e
+
+
+def get_stream_handler():
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.INFO)
+    stdout_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)-12s %(levelname)-8s %(message)s", "%Y-%m-%dT%H:%M:%S"
+    ))
+    return stdout_handler
