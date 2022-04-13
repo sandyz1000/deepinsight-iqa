@@ -6,7 +6,6 @@ from deepinsight_iqa.data_pipeline import (TFDatasetType, TFRecordDataset)
 from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.trainer import Trainer
-from functools import partial
 TRAINING_MODELS = ["objective", "subjective"]
 
 
@@ -110,7 +109,6 @@ def train(algo, train_model, conf_file, base_dir, input_file, image_dir, pretrai
         train_nima(cfg, image_dir, base_dir, input_file)
 
     elif algo == "diqa":
-        from deepinsight_iqa.diqa.train import train_diqa
         train_diqa(
             cfg, image_dir, input_file,
             pretrained_model=pretrained_model, train_model=train_model

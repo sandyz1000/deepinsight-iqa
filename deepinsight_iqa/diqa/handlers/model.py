@@ -4,14 +4,15 @@ import tensorflow as tf
 import tensorflow.keras.layers as KL
 import tensorflow.keras.applications as KA
 import tensorflow.keras.models as KM
-
+from .fcn import fcn_8_resnet50, fcn_8_mobilenet, fcn_8_vgg
 MODEL_FILE_NAME = "model.h5"
 CONFIG_FILE_NAME = "config.yml"
-
 
 # TODO:
 # - Verify if model need to be build
 # - Print the keras layer in terminal and plot
+
+
 class BaseModel(tf.keras.Model):
 
     def save_pretrained(self, saved_path):
@@ -51,43 +52,58 @@ class CustomModel(KM.Model):
 
 
 def get_bottleneck(model_name: str, **kwds):
-    if model_name == 'InceptionV3':
-        model = KA.InceptionV3(
-            input_shape=(None, None, 3), include_top=False,
-            weights="imagenet")
+    """Get the bottleneck layer given the name
 
-    elif model_name == 'MobileNet':
-        model = KA.MobileNetV2(
-            input_shape=(None, None, 3), include_top=False,
-            weights="imagenet")
+    :param _type_ model_name: _description_
+    :raises AttributeError: _description_
+    :return _type_: _description_
+    """
+    try:
+        if model_name == "imagenet":
+            mapping = \
+                {
+                    "InceptionV3": KA.InceptionV3,
+                    "MobileNet": KA.MobileNet,
+                    "InceptionResNetV2": KA.InceptionResNetV2
+                }
+            model_params = dict(input_shape=(None, None, 3), include_top=False, weights="imagenet")
+            if kwds.get('bottleneck') not in mapping.keys():
+                raise ValueError("Invalid model_name, enter from given options ")
+            
+            model = mapping[kwds.get('bottleneck')](**model_params)
 
-    elif model_name == "InceptionResNetV2":
-        model = KA.InceptionResNetV2(
-            input_shape=(None, None, 3), include_top=False,
-            weights="imagenet")
+        elif model_name == "diqa_custom":
+            model = CustomModel(model_name=model_name, **kwds)
 
-    elif model_name == "diqa_custom":
-        model = CustomModel(model_name=model_name, **kwds)
+        elif model_name == 'fcn':
+            FCN_BOTTLENECK = \
+                {
+                    'fcn_8_resnet50': fcn_8_resnet50,
+                    'fcn_8_mobilenet': fcn_8_mobilenet,
+                    'fcn_8_vgg': fcn_8_vgg
+                }
 
-    elif model_name == 'fcn':
-        pass
+            model = FCN_BOTTLENECK[kwds.get('bottleneck')]()
+
+    except Exception as e:
+        raise e
 
     return model
 
 
 class Diqa(BaseModel):
     def __init__(
-        self, 
+        self,
         base_model_name: str,
-        shape=(None, None, 1), 
-        batch_size=1, 
-        in_layer_name='original_image', 
+        shape=(None, None, 1),
+        batch_size=1,
+        in_layer_name='original_image',
         **kwds
     ) -> None:
         bottleneck = get_bottleneck(
-            model_name=base_model_name, 
-            shape=shape, 
-            batch_size=batch_size, 
+            model_name=base_model_name,
+            shape=shape,
+            batch_size=batch_size,
             in_layer_name=in_layer_name
         )
         self.custom = True if base_model_name == "diqa_custom" else False
@@ -106,28 +122,6 @@ class Diqa(BaseModel):
         else:
             self.subjective_model.load_weights(model_path)
 
-class Diqa(object):
-    def __init__(self, base_model_name, custom=False) -> None:
-        # Initialize objective model for training
-        self.__objective_network = ObjectiveNetwork(base_model_name, custom=custom)
-        self.__subjective_network = SubjectiveNetwork()
-        self.__subjective_model = None
-        self.__objective_model = None
-
-    @property
-    def subjective(self):
-        return self.__subjective_model
-
-    @property
-    def objective(self):
-        return self.__objective_model
-
-    def _build(self):
-        self.__objective_model = self.__objective_network().model
-        self.__subjective_model = self.__subjective_network(
-            self.objective.input, 
-            self.objective.get_layer('bottleneck').output
-        ).model
 
 class ObjectiveModel(KM.Model):
     """
