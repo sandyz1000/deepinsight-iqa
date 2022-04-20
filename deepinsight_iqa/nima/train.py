@@ -118,12 +118,3 @@ class Train:
                                            callbacks=[tensorboard, model_checkpointer])
 
         K.clear_session()
-
-
-def train_nima(cfg, image_dir, base_dir, input_file):
-    import json
-    samples_file = os.path.join(base_dir, input_file)
-    samples = json.load(open(samples_file, 'r'))
-    trainer = Train(samples=samples, job_dir=base_dir, image_dir=image_dir, **cfg)
-    trainer.train()
-    return 0

@@ -1,9 +1,13 @@
 import os
-import sys
+import pandas as pd
+import numpy as np
 import tensorflow as tf
 from deepinsight_iqa.data_pipeline.diqa_gen import diqa_datagen
 from deepinsight_iqa.common.utility import get_stream_handler
 from typing import Callable
+import logging
+
+
 logger = logging.getLogger(__name__)
 stdout_handler = get_stream_handler()
 logger.addHandler(stdout_handler)
@@ -16,18 +20,18 @@ _DATAGEN_MAPPING = {
 
 
 def get_iqa_tfds(
-    image_dir: str, 
-    csv_path: str, 
+    image_dir: str,
+    csv_path: str,
     dataset_type: str,
     image_preprocess: Callable = None,
-    do_augment=False, 
+    do_augment=False,
     input_size=(256, 256), batch_size=8, channel_dim=3
 ):
     if dataset_type is None:
         assert os.path.exists(csv_path), FileNotFoundError("Csv/Json file not found")
         df = pd.read_csv(csv_path)
         samples_train, samples_test = (
-            df.iloc[:int(len(df) * 0.7), ].to_numpy(), 
+            df.iloc[:int(len(df) * 0.7), ].to_numpy(),
             df.iloc[int(len(df) * 0.7):, ].to_numpy()
         )
 
@@ -92,24 +96,30 @@ def get_iqa_tfds(
             channel_dim=channel_dim,
             shuffle=False,
         )
-    
+
     logger.info(f"Train Step: {train_steps} -- Valid Steps: {valid_steps}")
     return train_tfds, valid_tfds
 
 
 def get_iqa_datagen(
-    image_dir: str, csv_path: str,
+    image_dir: str,
+    csv_path: str,
     dataset_type: str = None,
     image_preprocess: Callable = None,
-    do_augment=False, input_size=(256, 256), batch_size=8, channel_dim=3
+    do_augment=False,
+    input_size=(256, 256),
+    batch_size=8,
+    channel_dim=3,
+    **kwds
 ):
     if dataset_type is None:
-        assert os.path.exists(csv_path), FileNotFoundError("Csv/Json file not found")
+        assert os.path.exists(csv_path), \
+            FileNotFoundError("Csv/Json file not found")
+        
         df = pd.read_csv(csv_path)
-        samples_train, samples_test = (
-            df.iloc[:int(len(df) * 0.7), ].to_numpy(),
-            df.iloc[int(len(df) * 0.7):, ].to_numpy()
-        )
+        samples_train = df.iloc[int(len(df) * 0.7):, ].to_numpy()  # type: np.ndarray
+        samples_test = df.iloc[:int(len(df) * 0.7), ].to_numpy()  # type: np.ndarray
+        
         train_datagen = diqa_datagen.DiqaCombineDataGen(
             image_dir,
             samples_train,

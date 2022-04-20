@@ -2,10 +2,13 @@ import os
 import json
 import click
 import sys
+from typing import Dict, List, Any
 from deepinsight_iqa.data_pipeline import (TFDatasetType, TFRecordDataset)
 from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
-from deepinsight_iqa.diqa.trainer import Trainer
+from deepinsight_iqa.diqa.trainer import Trainer as DiqaTrainer
+from deepinsight_iqa.nima.train import Train as NimaTrainer
+
 TRAINING_MODELS = ["objective", "subjective"]
 
 
@@ -52,7 +55,21 @@ def parse_config(job_dir, config_file):
     return config
 
 
-def train_diqa(cfg, image_dir, input_file, pretrained_model=None, train_model='all'):
+def train_nima(cfg, image_dir, base_dir, input_file):
+    samples_file = os.path.join(base_dir, input_file)
+    samples = json.load(open(samples_file, 'r'))
+    trainer = NimaTrainer(samples=samples, job_dir=base_dir, image_dir=image_dir, **cfg)
+    trainer.train()
+    return 0
+
+
+def train_diqa(
+    cfg, 
+    image_dir, 
+    input_file, 
+    weight_path=None, 
+    network='subjective'
+):
     dataset_type = cfg.pop('dataset_type', None)
     model_dir = cfg.pop('model_dir', 'weights/diqa')
     # NOTE: Based on dataset_type init the corresponding datagenerator
@@ -78,40 +95,54 @@ def train_diqa(cfg, image_dir, input_file, pretrained_model=None, train_model='a
             channel_dim=cfg['channel_dim'],
             batch_size=cfg['batch_size']
         )
-
-    trainer = Trainer(train_tfds, valid_datagen=valid_tfds, model_dir=model_dir, **cfg)
-    if pretrained_model:
-        trainer.loadweights(pretrained_model)
-    if train_model == "objective":
-        trainer.train_subjective()
-    elif train_model == "subjective":
+    
+    network = network if network else cfg.pop('network', 'subjective')
+    trainer = DiqaTrainer(
+        train_tfds,
+        valid_datagen=valid_tfds,
+        model_dir=model_dir,
+        network=network,
+        **cfg
+    )
+    
+    if network == "objective":
         trainer.train_objective()
-
-    return 0
+        return 0
+        
+    trainer.train_final()
 
 
 @click.command()
 @click.option('-m', '--algo', required=True, show_choices=["nima", "diqa"], help="Pass algorithm to train")
-@click.option('-t', '--train_model', default='subjective', show_choices=TRAINING_MODELS[:],
+@click.option('-n', '--network', required=False, show_choices=TRAINING_MODELS[:],
               help="Arguments to mention if network need to be train completely or partially")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
 @click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found',
               default=os.getcwd())
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
-@click.option('-p', '--pretrained_model', show_choices=TRAINING_MODELS,
-              type=str, help='Set pretrained to start training using pretrained n/w',
-              default=None)
-def train(algo, train_model, conf_file, base_dir, input_file, image_dir, pretrained_model=None):
-    cfg = parse_config(base_dir, conf_file)
+@click.option('-p', '--weight_path', type=str, help='Set pretrained to start training using pretrained n/w')
+def train(
+    algo: str,
+    network: str,
+    conf_file: str,
+    base_dir: str,
+    input_file: str,
+    image_dir: str,
+    weight_path: str = None
+):
+    cfg = parse_config(base_dir, conf_file)  # type: Dict
     if algo == "nima":
-        from deepinsight_iqa.nima.train import train_nima
         train_nima(cfg, image_dir, base_dir, input_file)
 
     elif algo == "diqa":
+        print(f"Setting pretrained model type to {weight_path}")
         train_diqa(
-            cfg, image_dir, input_file,
-            pretrained_model=pretrained_model, train_model=train_model
+            cfg,
+            image_dir,
+            input_file,
+            weight_path=weight_path,
+            network=network
         )
 
 

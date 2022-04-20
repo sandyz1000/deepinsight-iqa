@@ -2,7 +2,7 @@ import sys
 import os
 from typing import Optional
 import tensorflow as tf
-from .handlers.model import Diqa
+from .networks.model import Diqa
 from .utils.tf_imgutils import image_preprocess
 from time import perf_counter
 import logging

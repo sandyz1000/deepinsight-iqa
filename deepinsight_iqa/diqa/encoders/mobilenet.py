@@ -3,7 +3,7 @@ import tensorflow.keras.layers as KL
 import tensorflow.keras.backend as K
 from tensorflow.keras.utils import get_file
 
-from .config import IMAGE_ORDERING
+from . import IMAGE_ORDERING
 
 BASE_WEIGHT_PATH = ('https://github.com/fchollet/deep-learning-models/'
                     'releases/download/v0.6/')

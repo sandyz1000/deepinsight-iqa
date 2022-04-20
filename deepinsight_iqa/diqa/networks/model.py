@@ -1,10 +1,11 @@
 import typing as tp
 import os
+import time
 import tensorflow as tf
 import tensorflow.keras.layers as KL
 import tensorflow.keras.applications as KA
 import tensorflow.keras.models as KM
-from .fcn import fcn_8_resnet50, fcn_8_mobilenet, fcn_8_vgg
+from abc import abstractmethod
 MODEL_FILE_NAME = "model.h5"
 CONFIG_FILE_NAME = "config.yml"
 
@@ -14,11 +15,21 @@ CONFIG_FILE_NAME = "config.yml"
 
 
 class BaseModel(tf.keras.Model):
+    @abstractmethod
+    def save_pretrained(self, saved_path: str, prefix):
+        """_summary_
 
-    def save_pretrained(self, saved_path):
-        """Save config and weights to file"""
-        os.makedirs(saved_path, exist_ok=True)
-        self.save_weights(os.path.join(saved_path, MODEL_FILE_NAME))
+        :param _type_ saved_path: _description_
+        :param _type_ prefix: _description_
+        """
+
+    @abstractmethod
+    def load_weights(self, model_path: str, prefix):
+        """_summary_
+
+        :param _type_ model_path: _description_
+        :param _type_ prefix: _description_
+        """
 
 
 class CustomModel(KM.Model):
@@ -51,7 +62,7 @@ class CustomModel(KM.Model):
         return output
 
 
-def get_bottleneck(model_name: str, **kwds):
+def get_bottleneck(model_name: str, **kwds) -> KM.Model:
     """Get the bottleneck layer given the name
 
     :param _type_ model_name: _description_
@@ -69,26 +80,16 @@ def get_bottleneck(model_name: str, **kwds):
             model_params = dict(input_shape=(None, None, 3), include_top=False, weights="imagenet")
             if kwds.get('bottleneck') not in mapping.keys():
                 raise ValueError("Invalid model_name, enter from given options ")
-            
+
             model = mapping[kwds.get('bottleneck')](**model_params)
 
         elif model_name == "diqa_custom":
             model = CustomModel(model_name=model_name, **kwds)
 
-        elif model_name == 'fcn':
-            FCN_BOTTLENECK = \
-                {
-                    'fcn_8_resnet50': fcn_8_resnet50,
-                    'fcn_8_mobilenet': fcn_8_mobilenet,
-                    'fcn_8_vgg': fcn_8_vgg
-                }
-
-            model = FCN_BOTTLENECK[kwds.get('bottleneck')]()
+        return model
 
     except Exception as e:
         raise e
-
-    return model
 
 
 class Diqa(BaseModel):
@@ -109,18 +110,56 @@ class Diqa(BaseModel):
         self.custom = True if base_model_name == "diqa_custom" else False
         # Initialize objective and subjective model for training/inference
 
-        self.objective_model = ObjectiveModel(bottleneck, custom=self.custom)
-        self.subjective_model = SubjectiveModel(bottleneck)
+        self.__objective = ObjectiveModel(bottleneck, custom=self.custom)
+        self.__subjective = SubjectiveModel(bottleneck)
 
-    def call(self, input_tensor: tf.Tensor, objective_output: bool = False):
-        return self.objective_model(input_tensor) if objective_output else self.subjective_model(input_tensor)
+    @property
+    def objective_model(self):
+        return self.__objective
 
-    def load_weights(self, model_path: str, prefix='objective'):
-        assert os.path.exists(model_path), FileNotFoundError(f"Model path {model_path} not found")
+    @property
+    def subjective_model(self):
+        return self.__subjective
+
+    def call(
+        self,
+        input_tensor: tf.Tensor,
+        objective_output: bool = False
+    ):
+        """Call the model 
+
+        :param tf.Tensor input_tensor: _description_
+        :param bool objective_output: _description_, defaults to False
+        """
+        return self.__objective(input_tensor) if objective_output \
+            else self.__subjective(input_tensor)
+
+    def __get_model_fname(self, saved_path, prefix):
+        now = time.time()
+        filename, ext = os.path.splitext(MODEL_FILE_NAME)
+        model_path = os.path.join(saved_path, f"{prefix}-{filename}-{now}{ext}")
+        return model_path
+
+    def save_pretrained(self, saved_path, prefix):
+        """Save config and weights to file"""
+
+        os.makedirs(saved_path, exist_ok=True)
+        model_path = self.__get_model_fname(saved_path, prefix)
+
         if prefix == 'objective':
-            self.objective_model.load_weights(model_path)
-        else:
-            self.subjective_model.load_weights(model_path)
+            self.__objective.save_weights(model_path)
+
+        self.__subjective.save_weights(model_path)
+
+    def load_weights(self, saved_path: str, prefix):
+        model_path = self.__get_model_fname(saved_path, prefix)
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model path {model_path} not found")
+
+        if prefix == 'objective':
+            self.__objective.load_weights(model_path)
+
+        self.__subjective.load_weights(model_path)
 
 
 class ObjectiveModel(KM.Model):

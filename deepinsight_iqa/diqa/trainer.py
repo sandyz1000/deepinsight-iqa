@@ -1,14 +1,15 @@
 from typing import Optional, Callable, Iterator, Union
-from .handlers.utils import gradient, calculate_error_map, loss
 import os
 import tqdm
 import sys
 import enum
 import logging
+from pathlib import Path
 import tensorflow as tf
 from tensorflow.keras.callbacks import ModelCheckpoint
 import tensorflow.keras.backend as K
-from .handlers.model import Diqa, BaseModel
+from .networks.model import Diqa, BaseModel
+from .networks.utils import gradient, calculate_error_map, loss
 from deepinsight_iqa.common.utility import set_gpu_limit, get_stream_handler
 # set_gpu_limit(10)
 
@@ -114,16 +115,9 @@ class Trainer:
         self.train_datagen = train_datagen
         self.valid_datagen = valid_datagen
 
-    def loadweights(self, pretrained_model_name: str):
-        filename = (self.objective_weightfname if pretrained_model_name == ModelType.objective.value
-                    else self.subjective_weightfname)
-        model_path = os.path.join(self.model_dir, self.base_model_name, filename)
-        
-        assert os.path.exists(model_path), FileNotFoundError("Objective Model file not found")
-        if pretrained_model_name == ModelType.objective.value:
-            self.diqa.load_weights(model_path, prefix='objective')
-        else:
-            self.diqa.load_weights(model_path, prefix='subjective')
+        network = kwargs.pop('network')
+        if kwargs.get('pretrained', False):
+            self.diqa.load_weights(self.model_dir, network)
 
     def train_objective(self):
         from .utils.callbacks import TensorBoardBatch
@@ -193,12 +187,9 @@ class Trainer:
                     train_step.accuracy.result() * 100,)
                 )
 
-        # Save the objective model
-        model_path = os.path.join(self.model_dir, self.base_model_name, self.objective_weightfname)
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        self.diqa.subjective_model.save(model_path)
+        self.diqa.save_pretrained(self.model_dir, prefix='objective')
 
-    def train_subjective(self):
+    def train_final(self):
         
         tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir)
         model_checkpointer = ModelCheckpoint(
@@ -235,8 +226,6 @@ class Trainer:
             workers=self.num_workers_data_load,
             callbacks=[model_checkpointer, tensorboard_callback]
         )
-        # Save the subjective model
-        model_path = os.path.join(self.model_dir, self.base_model_name, self.subjective_weightfname)
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        self.diqa.subjective_model.save(model_path)
-        K.clear_session()
+        
+        self.diqa.save_pretrained(self.model_dir, prefix='subjective')
+        

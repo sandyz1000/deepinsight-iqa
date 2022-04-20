@@ -1,7 +1,6 @@
 {
 	"model_dir": "weights/diqa",
-	"subjective_weightfname": "diqa-final-weights.h5",
-	"objective_weightfname": "objective-diqa-final-weights-epoch-5.h5",
+	"network": "subjective",
 	"log_dir": "logs/mobilenet", 
 	"base_model_name": "MobileNet",
 	"dataset_type": null,

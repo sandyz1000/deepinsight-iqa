@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 from typing import Union, Iterator, Tuple
 from deepinsight_iqa.common.utility import thread_safe_singleton
-from deepinsight_iqa.diqa.handlers.model import Diqa
+from .networks.model import Diqa
 from scipy.stats import pearsonr, spearmanr
 import pandas as pd
 
@@ -31,8 +31,8 @@ class Evaluation:
         self.datagen = data_iter
         df = pd.read_csv(csv_path)
         
-        self.diqa.subjective_model.load_weights(model_path)
-        self.final_model = self.diqa.subjective_model
+        self.diqa.__subjective.load_weights(model_path)
+        self.final_model = self.diqa.__subjective
 
     def get_image_score_pair(
         self,

@@ -729,8 +729,10 @@ def get_tfds_v2(
     img_preprocessing: Callable = None,
     input_size: Tuple[int] = (256, 256),
     img_crop_dims: Tuple[int] = (224, 224),
-    shuffle: bool = False, epochs: int = 300,
-    do_augment: bool = False, channel_dim: int = 3,
+    shuffle: bool = False, 
+    epochs: int = 300,
+    do_augment: bool = False, 
+    channel_dim: int = 3,
 ):
     steps_per_epoch = np.floor(len(samples) / batch_size)
 
@@ -762,7 +764,8 @@ def get_tfds_v2(
     @_ds_from_sequence(output_types=output_types, output_shapes=output_shapes,)
     def train_batch_from_sequence(batch_idx):
         batch_idx = batch_idx.numpy()
-        # zero-based index for what batch of data to load; i.e. goes to 0 at stepsPerEpoch and starts cound over
+        # zero-based index for what batch of data to load; 
+        # i.e. goes to 0 at stepsPerEpoch and starts cound over
         zeroBatch = batch_idx % steps_per_epoch
         X_ref, X_dst, score = image_gen[zeroBatch]
         return X_ref, X_dst, score

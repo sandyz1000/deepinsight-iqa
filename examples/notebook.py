@@ -10,7 +10,7 @@ sys.path.append(os.path.realpath(os.path.pardir))
 from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_normalization, image_preprocess
 from deepinsight_iqa.diqa.predict import Prediction
-from deepinsight_iqa.diqa.train import Trainer
+from deepinsight_iqa.diqa.trainer import Trainer
 
 
 
@@ -25,13 +25,15 @@ job_dir = os.path.realpath(os.path.curdir)
 # %% [markdown]
 # ## Set image directory and path
 # %%
-image_dir, csv_path = "/Volumes/SDM/Dataset/iqa/tech-dataset", "combine.csv"
-config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_inceptionv3.json"))
+image_dir, csv_path = "/Volumes/SDM/Dataset/iqa/techical", "combine.csv"
+config_file = os.path.realpath(os.path.join(job_dir, "configs/diqa/inceptionv3.json"))
 cfg = parse_config(job_dir, config_file)
-# train, valid = get_iqa_combined_datagen(
-#     image_dir, csv_path, do_augment=cfg['use_augmentation'],
-#     image_preprocess=image_preprocess, input_size=cfg['input_size']
-# )
+
+# %%
+train, valid = get_iqa_datagen(
+    image_dir, csv_path, do_augment=cfg['use_augmentation'],
+    image_preprocess=image_preprocess, input_size=cfg['input_size']
+)
 # %%
 it = iter(train)
 X_dist, X_ref, Y = next(it)
