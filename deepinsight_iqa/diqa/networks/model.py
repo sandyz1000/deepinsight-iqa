@@ -6,12 +6,14 @@ import tensorflow.keras.layers as KL
 import tensorflow.keras.applications as KA
 import tensorflow.keras.models as KM
 from abc import abstractmethod
-MODEL_FILE_NAME = "model.h5"
-CONFIG_FILE_NAME = "config.yml"
-
-# TODO:
-# - Verify if model need to be build
-# - Print the keras layer in terminal and plot
+from .. import (
+    CUSTOM_MODEL_TYPE,
+    IMAGENET_MODEL_TYPE,
+    MODEL_FILE_NAME,
+    CONFIG_FILE_NAME,
+    SUBJECTIVE_NW,
+    OBJECTIVE_NW
+)
 
 
 class BaseModel(tf.keras.Model):
@@ -34,92 +36,99 @@ class BaseModel(tf.keras.Model):
 
 class CustomModel(KM.Model):
     def __init__(
-        self, *args,
-        model_name: str = "diqa_custom",
+        self,
         shape: tp.Union[tf.TensorShape, tp.Tuple] = (None, None, 1),
         batch_size: int = 1,
-        in_layer_name: str = 'original_image', **kwds
+        in_layer_name: str = 'original_image',
+        **kwds
     ) -> None:
-        super(CustomModel, self).__init__(*args, **kwds)
-        self.layers = [
-            KL.InputLayer(shape=shape, batch_size=batch_size, name=in_layer_name),
-            KL.Conv2D(48, (3, 3), name='Conv1', activation='relu', padding='same'),
-            KL.Conv2D(48, (3, 3), name='Conv2', activation='relu', padding='same', strides=(2, 2)),
-            KL.Conv2D(64, (3, 3), name='Conv3', activation='relu', padding='same'),
-            KL.Conv2D(64, (3, 3), name='Conv4', activation='relu', padding='same', strides=(2, 2)),
-            KL.Conv2D(64, (3, 3), name='Conv5', activation='relu', padding='same'),
-            KL.Conv2D(64, (3, 3), name='Conv6', activation='relu', padding='same', strides=(2, 2)),
-            KL.Conv2D(128, (3, 3), name='Conv7', activation='relu', padding='same'),
-            KL.Conv2D(128, (3, 3), name='bottleneck', activation='relu', padding='same', strides=(2, 2))
-        ]
-        self.model_name = model_name
+        super(CustomModel, self).__init__()
+
+        self.input = KL.InputLayer(shape=shape, batch_size=batch_size, name=in_layer_name)
+        self.conv1 = KL.Conv2D(48, (3, 3), name='Conv1', activation='relu', padding='same')
+        self.conv2 = KL.Conv2D(48, (3, 3), name='Conv2', activation='relu', padding='same', strides=(2, 2))
+        self.conv3 = KL.Conv2D(64, (3, 3), name='Conv3', activation='relu', padding='same')
+        self.conv4 = KL.Conv2D(64, (3, 3), name='Conv4', activation='relu', padding='same', strides=(2, 2))
+        self.conv5 = KL.Conv2D(64, (3, 3), name='Conv5', activation='relu', padding='same')
+        self.conv6 = KL.Conv2D(64, (3, 3), name='Conv6', activation='relu', padding='same', strides=(2, 2))
+        self.conv7 = KL.Conv2D(128, (3, 3), name='Conv7', activation='relu', padding='same')
+        self.conv8 = KL.Conv2D(128, (3, 3), name='bottleneck', activation='relu', padding='same', strides=(2, 2))
 
     def call(self, inputs: tf.Tensor):
-        output = self.layers[0](inputs)
-        for layer in self.layers[1:]:
-            output = layer(output)
+        out = self.input(inputs)
+        out = self.conv1(out)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        out = self.conv4(out)
+        out = self.conv5(out)
+        out = self.conv6(out)
+        out = self.conv7(out)
+        out = self.conv8(out)
 
-        return output
+        return out
 
 
-def get_bottleneck(model_name: str, **kwds) -> KM.Model:
+def get_bottleneck(model_type: str, *, bottleneck_layer_name: str = None, **kwds) -> KM.Model:
     """Get the bottleneck layer given the name
 
     :param _type_ model_name: _description_
     :raises AttributeError: _description_
     :return _type_: _description_
     """
-    try:
-        if model_name == "imagenet":
-            mapping = \
-                {
-                    "InceptionV3": KA.InceptionV3,
-                    "MobileNet": KA.MobileNet,
-                    "InceptionResNetV2": KA.InceptionResNetV2
-                }
-            model_params = dict(input_shape=(None, None, 3), include_top=False, weights="imagenet")
-            if kwds.get('bottleneck') not in mapping.keys():
-                raise ValueError("Invalid model_name, enter from given options ")
+    mapping = \
+        {
+            "InceptionV3": KA.InceptionV3,
+            "MobileNet": KA.MobileNet,
+            "InceptionResNetV2": KA.InceptionResNetV2
+        }
+    if model_type == IMAGENET_MODEL_TYPE:
 
-            model = mapping[kwds.get('bottleneck')](**model_params)
+        model_params = dict(input_shape=(None, None, 3), include_top=False, weights="imagenet")
+        if bottleneck_layer_name not in mapping.keys():
+            raise ValueError("Invalid model_name, enter from given options ")
 
-        elif model_name == "diqa_custom":
-            model = CustomModel(model_name=model_name, **kwds)
+        model = mapping[bottleneck_layer_name](**model_params)
 
-        return model
+    elif model_type == CUSTOM_MODEL_TYPE:
+        model = CustomModel(**kwds)
 
-    except Exception as e:
-        raise e
+    else:
+        raise AttributeError("Invalid model options ", {model_type})
+
+    return model
 
 
 class Diqa(BaseModel):
     def __init__(
         self,
-        base_model_name: str,
+        model_type: str,
+        bottleneck_layer_name: str,
         shape=(None, None, 1),
         batch_size=1,
         in_layer_name='original_image',
         **kwds
     ) -> None:
+        super(Diqa, self).__init__()
         bottleneck = get_bottleneck(
-            model_name=base_model_name,
+            model_type=model_type,
+            bottleneck_layer_name=bottleneck_layer_name,
             shape=shape,
             batch_size=batch_size,
             in_layer_name=in_layer_name
         )
-        self.custom = True if base_model_name == "diqa_custom" else False
+        self.custom = True if model_type == CUSTOM_MODEL_TYPE else False
         # Initialize objective and subjective model for training/inference
 
-        self.__objective = ObjectiveModel(bottleneck, custom=self.custom)
-        self.__subjective = SubjectiveModel(bottleneck)
+        self.__objective_net = ObjectiveModel(bottleneck, custom=self.custom)
+        self.__subjective_net = SubjectiveModel(bottleneck)
 
     @property
     def objective_model(self):
-        return self.__objective
+        return self.__objective_net
 
     @property
     def subjective_model(self):
-        return self.__subjective
+        return self.__subjective_net
 
     def call(
         self,
@@ -131,8 +140,8 @@ class Diqa(BaseModel):
         :param tf.Tensor input_tensor: _description_
         :param bool objective_output: _description_, defaults to False
         """
-        return self.__objective(input_tensor) if objective_output \
-            else self.__subjective(input_tensor)
+        return self.__objective_net(input_tensor) if objective_output \
+            else self.__subjective_net(input_tensor)
 
     def __get_model_fname(self, saved_path, prefix):
         now = time.time()
@@ -140,26 +149,26 @@ class Diqa(BaseModel):
         model_path = os.path.join(saved_path, f"{prefix}-{filename}-{now}{ext}")
         return model_path
 
-    def save_pretrained(self, saved_path, prefix):
+    def save_pretrained(self, saved_path, prefix=None):
         """Save config and weights to file"""
 
         os.makedirs(saved_path, exist_ok=True)
         model_path = self.__get_model_fname(saved_path, prefix)
 
-        if prefix == 'objective':
-            self.__objective.save_weights(model_path)
-
-        self.__subjective.save_weights(model_path)
+        if prefix == OBJECTIVE_NW:
+            self.__objective_net.save_weights(model_path)
+        else:
+            self.__subjective_net.save_weights(model_path)
 
     def load_weights(self, saved_path: str, prefix):
         model_path = self.__get_model_fname(saved_path, prefix)
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model path {model_path} not found")
 
-        if prefix == 'objective':
-            self.__objective.load_weights(model_path)
-
-        self.__subjective.load_weights(model_path)
+        if prefix == OBJECTIVE_NW:
+            self.__objective_net.load_weights(model_path)
+        else:
+            self.__subjective_net.load_weights(model_path)
 
 
 class ObjectiveModel(KM.Model):
@@ -170,30 +179,32 @@ class ObjectiveModel(KM.Model):
     """
 
     def __init__(self, bottleneck: KM.Model, custom: bool = False) -> None:
-        name = 'objective_error_map'
+        super(ObjectiveModel, self).__init__()
+        
         self.custom = custom
-        self.loss = (lambda name: tf.keras.metrics.Mean(name, dtype=tf.float32))
-        self.accuracy = (lambda name: tf.keras.metrics.MeanSquaredError(name))
-        self.optimizer = tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
-
-        self.layers = [bottleneck]
+        self.bottleneck = bottleneck
         if self.custom:
-            self.layers.append(KL.Conv2D(1, (1, 1), name='final', padding='same', activation='linear'))
+            self.final = KL.Conv2D(1, (1, 1), name='final', padding='same', activation='linear')
         else:
-            self.layers += [
-                KL.Conv2D(512, (1, 1), use_bias=False, activation='relu'),
-                KL.Conv2D(256, (1, 1), use_bias=False, activation='relu'),
-                KL.Conv2D(128, (1, 1), use_bias=False, activation='relu', name='bottleneck'),
-                KL.Conv2D(1, (1, 1), name='final', use_bias=False, activation='relu')
-            ]
+            self.conv1 = KL.Conv2D(512, (1, 1), use_bias=False, activation='relu')
+            self.conv2 = KL.Conv2D(256, (1, 1), use_bias=False, activation='relu')
+            self.conv3 = KL.Conv2D(128, (1, 1), use_bias=False, activation='relu', name='bottleneck')
+            self.final = KL.Conv2D(1, (1, 1), name='final', use_bias=False, activation='relu')
+
+        print(">>> Created objective model >>>")
 
     def call(self, input_tensor: tf.Tensor):
-        output_tensor = self.layers[0](input_tensor)
+        out = self.bottleneck(input_tensor)
 
-        for layer in self.layers[1:]:
-            output_tensor = layer(output_tensor)
+        if self.custom:
+            out = self.final(out)
+        else:
+            out = self.conv1(out)
+            out = self.conv2(out)
+            out = self.conv3(out)
+            out = self.final(out)
 
-        return output_tensor
+        return out
 
 
 class SubjectiveModel(KM.Model):
@@ -219,29 +230,18 @@ class SubjectiveModel(KM.Model):
     """
 
     def __init__(self, bottleneck: KM.Model) -> None:
-        self.name = 'subjective_error_map'
-        self.optimizer = tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
+        super(SubjectiveModel, self).__init__()
+        # self.name = 'subjective_error_map'
         self.bottleneck = bottleneck
-        self.layers = [
-            bottleneck,
-            KL.GlobalAveragePooling2D(data_format='channels_last'),
-            KL.Dense(128, activation='relu'),
-            KL.Dense(128, activation='relu'),
-            KL.Dense(1)
-        ]
-
-    def compile(self):
-        self.model.compile(
-            optimizer=self.optimizer,
-            loss=tf.losses.MeanSquaredError(),
-            metrics=[tf.metrics.MeanSquaredError()]
-        )
-        return self
+        self.gap = KL.GlobalAveragePooling2D(data_format='channels_last')
+        self.dense1 = KL.Dense(128, activation='relu')
+        self.dense2 = KL.Dense(128, activation='relu')
+        self.final = KL.Dense(1)
 
     def call(self, input_tensor: tf.Tensor):
-        output_tensor = self.layers[0](input_tensor)
+        out = self.bottleneck(input_tensor)
 
-        for layer in self.layers[1:]:
-            output_tensor = layer(output_tensor)
-
-        return output_tensor
+        out = self.gap(out)
+        out = self.dense1(out)
+        out = self.dense2(out)
+        return self.final(out)

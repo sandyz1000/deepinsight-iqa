@@ -8,8 +8,7 @@ from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.trainer import Trainer as DiqaTrainer
 from deepinsight_iqa.nima.train import Train as NimaTrainer
-
-TRAINING_MODELS = ["objective", "subjective"]
+from deepinsight_iqa.diqa import TRAINING_MODELS, SUBJECTIVE_NW, OBJECTIVE_NW
 
 
 @click.command()
@@ -64,16 +63,23 @@ def train_nima(cfg, image_dir, base_dir, input_file):
 
 
 def train_diqa(
-    cfg, 
-    image_dir, 
-    input_file, 
-    weight_path=None, 
-    network='subjective'
+    cfg,
+    image_dir,
+    input_file,
+    model_dir=None,
+    network=None
 ):
+    from deepinsight_iqa.common.utility import set_gpu_limit
+    # set_gpu_limit(10)
+    
     dataset_type = cfg.pop('dataset_type', None)
-    model_dir = cfg.pop('model_dir', 'weights/diqa')
+    model_dir = model_dir if model_dir \
+        else cfg.pop('model_dir', 'weights/diqa')
+
     # NOTE: Based on dataset_type init the corresponding datagenerator
-    input_file = input_file if os.path.exists(input_file) else os.path.join(image_dir, input_file)
+    input_file = input_file if os.path.exists(input_file) \
+        else os.path.join(image_dir, input_file)
+
     if dataset_type:
         train_tfds, valid_tfds = get_iqa_datagen(
             image_dir,
@@ -95,8 +101,7 @@ def train_diqa(
             channel_dim=cfg['channel_dim'],
             batch_size=cfg['batch_size']
         )
-    
-    network = network if network else cfg.pop('network', 'subjective')
+
     trainer = DiqaTrainer(
         train_tfds,
         valid_datagen=valid_tfds,
@@ -104,11 +109,11 @@ def train_diqa(
         network=network,
         **cfg
     )
-    
-    if network == "objective":
+
+    if network == OBJECTIVE_NW:
         trainer.train_objective()
         return 0
-        
+
     trainer.train_final()
 
 
@@ -117,11 +122,9 @@ def train_diqa(
 @click.option('-n', '--network', required=False, show_choices=TRAINING_MODELS[:],
               help="Arguments to mention if network need to be train completely or partially")
 @click.option('-c', '--conf_file', help='train job directory with samples and config file', required=True)
-@click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found',
-              default=os.getcwd())
+@click.option('-b', '--base_dir', help='Directory where logs and weight can be stored/found', default="weigths/diqa")
 @click.option('-f', '--input-file', required=True, help='input csv/json file')
 @click.option('-i', '--image-dir', help='directory with image files', required=True)
-@click.option('-p', '--weight_path', type=str, help='Set pretrained to start training using pretrained n/w')
 def train(
     algo: str,
     network: str,
@@ -129,19 +132,24 @@ def train(
     base_dir: str,
     input_file: str,
     image_dir: str,
-    weight_path: str = None
 ):
     cfg = parse_config(base_dir, conf_file)  # type: Dict
     if algo == "nima":
         train_nima(cfg, image_dir, base_dir, input_file)
 
     elif algo == "diqa":
-        print(f"Setting pretrained model type to {weight_path}")
+        print(f"Setting pretrained model type to {base_dir}")
+        cfg_network = cfg.pop('network', SUBJECTIVE_NW)
+        cfg_model_dir = cfg.pop('model_dir', 'weights/diqa')
+
+        network = network if network else cfg_network
+        model_dir = base_dir if base_dir else cfg_model_dir
+
         train_diqa(
             cfg,
             image_dir,
             input_file,
-            weight_path=weight_path,
+            model_dir=model_dir,
             network=network
         )
 

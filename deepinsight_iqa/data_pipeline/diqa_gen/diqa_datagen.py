@@ -1,10 +1,12 @@
 import itertools
+import random
 import typing as tp
 from typing import Tuple, Callable, Dict, List, Union
 import pandas as pd
 from deepinsight_iqa.common import image_aug
 import tensorflow as tf
 import numpy as np
+from functools import partial
 from six import add_metaclass
 from abc import ABCMeta, abstractmethod
 import os
@@ -14,6 +16,14 @@ _AVA_OUTYPE = Tuple[Tuple[np.ndarray, str, str], float, List[int]]
 
 
 def load_image(img_file, target_size=None):
+    """Imahe utility to load from image-path
+
+    :param _type_ img_file: _description_
+    :param _type_ target_size: `load_img` Can accept optional arguments None, 
+    defaults to None
+    
+    :return np.ndarray: N-d tensor
+    """
     pilimg = tf.keras.preprocessing.image.load_img(img_file, target_size=target_size)
     return tf.keras.preprocessing.image.img_to_array(pilimg)
 
@@ -23,15 +33,21 @@ def read_image(filename: str, **kwargs) -> tf.Tensor:
     return tf.image.decode_image(stream, **kwargs)
 
 
-def _augmentation(img, rand_crop_dims=[200, 200]):
-    sequential = [
-        # (lambda img: image_aug.random_crop(img, rand_crop_dims)),
-        image_aug.random_horizontal_flip,
-        image_aug.random_vertical_flip
-    ]
-    for _func in sequential:
-        img = _func(img)
-    return img
+def _augmentation(img1, img2, rand_crop_dims=[416, 416], random_crop=False, geometric_augment=False):
+    
+    augmenter = [image_aug.random_horizontal_flip, image_aug.random_vertical_flip]
+    
+    if random_crop:
+        random_func = partial(image_aug.random_crop, rand_crop_dims)
+        augmenter.append(random_func)
+    
+    if geometric_augment:
+        geometric_func = partial(image_aug.augment_img, augmentation_name='geometric')
+        augmenter.append(geometric_func)
+
+    aug_fn = random.choice(augmenter)
+    img1, img2 = aug_fn(img1), aug_fn(img2)
+    return img1, img2
 
 
 class InvalidParserError(Exception):
@@ -140,6 +156,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         self.input_size = input_size  # dimensions that images get resized into when loaded
         self.img_crop_dims = img_crop_dims  # dimensions that images get randomly cropped to
         self.data_generator = self.__train_datagen__ if shuffle else self.__eval_datagen__
+        self.steps_per_epoch = np.floor(len(self.samples) / self.batch_size)
         if check_dir_availability:
             self._validate()  # All Image location not avaliable for the given dataset type
         self.on_epoch_end()  # call ensures that samples are shuffled in first epoch if shuffle is set to True
@@ -350,7 +367,8 @@ class AVADataRowParser(DiqaDataGenerator):
         self.tags = tf.lookup.StaticHashTable(_init, default_value="")
 
         super(AVADataRowParser, self).__init__(
-            df, img_dir,
+            df,
+            img_dir,
             batch_size=batch_size,
             img_preprocessing=img_preprocessing,
             input_size=target_size,
@@ -435,12 +453,13 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         img_preprocessing: Callable = None,
         input_size: Tuple[int] = (256, 256),
         img_crop_dims: Tuple[int] = (224, 224),
-        shuffle: bool = False,
+        do_train: bool = False,
         do_augment: bool = False,
         channel_dim: int = 3,
     ) -> None:
         """ Predict Generator that will generate batch of images from a folder
 
+        # NOTE: If do_train == False and do_augment == False, it will return eval generator
         Args:
             image_dir ([type]): [description]
             samples ([type]): [description]
@@ -449,7 +468,8 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
             input_size ([type], optional): [description]. Defaults to (256, 256).
             channel_dim ([type], optional): [description]. Defaults to 3.
         """
-        self.shuffle = shuffle
+        
+        self.do_train = do_train
         self.samples = samples
         self.image_dir = image_dir
         self.batch_size = batch_size
@@ -458,7 +478,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         self.channel_dim = channel_dim
         self.img_crop_dims = img_crop_dims
         self.do_augment = do_augment
-        self.data_generator = self.__train_generator if shuffle else self.__valid_generator
+        self.data_generator = self.__train_generator if self.do_train else self.__batch_generator
         self.steps_per_epoch = np.floor(len(self.samples) / self.batch_size)
         self.on_epoch_end()
 
@@ -467,7 +487,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
 
     def on_epoch_end(self):
         self.indexes = np.arange(len(self.samples))
-        if self.shuffle:
+        if self.do_train:
             np.random.shuffle(self.indexes)
 
     def __getitem__(self, index):
@@ -480,7 +500,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         X_ref = []
         Y = []
 
-        for row in range(batch_samples):
+        for row in batch_samples:
             _, i_d, i_r, mos_score = row
             i_d, i_r = [load_image(os.path.join(self.image_dir, im), target_size=self.input_size) for im in [i_d, i_r]]
 
@@ -492,7 +512,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
                 for im in [i_d, i_r]
             ]
             if self.do_augment:
-                i_d, i_r = [self.apply_aug(im, rand_crop_dims=self.img_crop_dims) for im in [i_d, i_r]]
+                i_d, i_r = _augmentation(i_d, i_r, rand_crop_dims=self.img_crop_dims, random_crop=False)
 
             X_dist.append(i_d)
             X_ref.append(i_r)
@@ -501,7 +521,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
         return X_dist, X_ref, Y
 
-    def __valid_generator(self, batch_samples):
+    def __batch_generator(self, batch_samples):
         X = []
         for dist_im in batch_samples:
             dist_im = load_image(os.path.join(self.image_dir, dist_im), target_size=self.input_size)
@@ -526,9 +546,10 @@ class get_train_datagenerator:
         img_preprocessing: Callable = None,
         input_size: Tuple[int] = (256, 256),
         img_crop_dims: Tuple[int] = (224, 224),
-        shuffle: bool = False,
+        do_train: bool = False,
         do_augment: bool = False,
-        channel_dim: int = 3, repeat: bool = False,
+        channel_dim: int = 3,
+        repeat: bool = False,
     ):
         """
         Generator that will generate shuffle image for AVA, TID2013 and CSIQ dataset combined
@@ -555,12 +576,10 @@ class get_train_datagenerator:
         self.img_preprocessing = img_preprocessing
         self.img_crop_dims = img_crop_dims
 
-        if shuffle:
+        if do_train:
             np.random.shuffle(samples)
         self.zipped = itertools.cycle(samples) if repeat else iter(samples)
-        # apply_aug = (lambda im: image_aug.augment_img(im, augmentation_name='geometric'))
-        self.apply_aug = _augmentation
-
+        
     def __iter__(self):
         return self
 
@@ -590,11 +609,8 @@ class get_train_datagenerator:
                     for im in [i_d, i_r]
                 ]
                 if self.do_augment:
-                    i_d, i_r = [
-                        self.apply_aug(im, rand_crop_dims=self.img_crop_dims)
-                        for im in [i_d, i_r]
-                    ]
-
+                    i_d, i_r = _augmentation(i_d, i_r, rand_crop_dims=self.img_crop_dims)
+                        
                 X_dist.append(i_d)
                 X_ref.append(i_r)
                 Y.append(mos_score)
@@ -605,7 +621,7 @@ class get_train_datagenerator:
         return X_dist, X_ref, Y
 
 
-class get_eval_datagenerator:
+class get_batch_datagenerator:
     def __init__(
         self,
         image_dir: str,
@@ -668,7 +684,9 @@ def get_tfdataset(
     img_preprocessing: Callable = None,
     input_size: Tuple[int] = (256, 256),
     img_crop_dims: Tuple[int] = (224, 224),
-    shuffle: bool = False, do_augment: bool = False, channel_dim: int = 3,
+    is_training: bool = False, 
+    do_augment: bool = False, 
+    channel_dim: int = 3,
 ) -> tf.data.Dataset:
     """Function to convert Keras Sequence to tensorflow dataset
 
@@ -697,12 +715,14 @@ def get_tfdataset(
         img_crop_dims=img_crop_dims,
         batch_size=batch_size,
         repeat=True,
-        shuffle=shuffle, do_augment=do_augment, channel_dim=channel_dim,
+        do_train=is_training,
+        do_augment=do_augment,
+        channel_dim=channel_dim,
     )
 
     steps_per_epoch = np.floor(len(samples) / batch_size)
     AUTOTUNE = tf.data.experimental.AUTOTUNE
-    if shuffle:
+    if is_training:
         dataset = tf.data.Dataset.from_generator(
             image_gen,
             output_types=(tf.float32, tf.float32, tf.float32),

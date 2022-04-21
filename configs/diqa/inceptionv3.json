@@ -1,7 +1,8 @@
 {
-	"model_dir": "weights/diqa",
-	"subjective_weightfname": "diqa-final-weights.h5",
-	"objective_weightfname": "objective-diqa-final-weights-epoch-5.h5",
+	"model_dir": "weights/diqa/inception",
+	"network": "subjective",
+	"model_type": "imagenet",
+	"use_pretrained": false,
 	"log_dir": "logs/inceptionv3", 
 	"base_model_name": "InceptionV3",
 	"dataset_type": null,
