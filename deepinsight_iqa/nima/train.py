@@ -1,8 +1,8 @@
 import os
 import numpy as np
 from typing import List, Union, Optional
-from keras import backend as K
-from keras.callbacks import ModelCheckpoint
+from tensorflow.keras import backend as K
+from tensorflow.keras.callbacks import ModelCheckpoint
 from sklearn.model_selection import train_test_split
 from ..data_pipeline.nima_gen.nima_datagen import NimaDataGenerator
 from .handlers.model_builder import Nima

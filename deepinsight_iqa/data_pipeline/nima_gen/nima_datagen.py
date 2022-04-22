@@ -5,7 +5,7 @@ import random
 import itertools
 from deepinsight_iqa.common import image_aug
 from tensorflow import keras
-from keras.applications.imagenet_utils import preprocess_input
+from tensorflow.keras.applications.imagenet_utils import preprocess_input
 import cv2
 from PIL import Image
 import json

@@ -1,7 +1,7 @@
 
-import keras.backend as K
+import tensorflow.keras.backend as K
 import tensorflow as tf
-from keras.callbacks import TensorBoard
+from tensorflow.keras.callbacks import TensorBoard
 
 
 class TensorBoardBatch(TensorBoard):
