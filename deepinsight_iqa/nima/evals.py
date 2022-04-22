@@ -10,7 +10,20 @@ from ..data_pipeline.nima_gen.nima_datagen import NimaDataGenerator as TestDataG
 class Evaluation:
     """ Given a subset of image dataset generate evaluation report """
 
-    def init_model(self, base_model_name="MobileNet", weights_file=None):
+    def __init__(
+        self,
+        base_model_name="MobileNet",
+        weights_file=None,
+        n_classes: int = 10,
+        batch_size: int = 64,
+        img_format: Optional[str] = 'jpg',
+        multiprocessing_data_load: bool = False
+    ):
+        self.n_classes = n_classes
+        self.batch_size = batch_size
+        self.img_format = img_format
+        self.multiprocessing_data_load = multiprocessing_data_load
+
         try:
             self.nima = Nima(base_model_name, weights=None)
             self.nima.build()
@@ -18,15 +31,11 @@ class Evaluation:
         except Exception as e:
             print("Unable to load NIMA weights", str(e))
             sys.exit(1)
-
-    def evaluation(
+        
+    def __call__(
         self,
         image_source: str,
-        predictions_file: Optional[str] = None,
-        n_classes: int = 10,
-        batch_size: int = 64,
-        img_format: Optional[str] = 'jpg',
-        multiprocessing_data_load: bool = False
+        predictions_file: Optional[str] = None
     ):
         # TODO: Save output and Calculate metric and save to csv
 
@@ -38,14 +47,14 @@ class Evaluation:
 
         # initialize data generator
         data_generator = TestDataGenerator(
-            samples, image_dir, batch_size, n_classes,
+            samples, image_dir, self.batch_size, self.n_classes,
             self.nima.preprocessing_function(),
-            img_format=img_format, do_train=False, shuffle=False
+            img_format=self.img_format, do_train=False, shuffle=False
         )
 
         # get predictions
         predictions = self.nima.nima_model.predict_generator(
-            data_generator, workers=8, use_multiprocessing=multiprocessing_data_load, verbose=1)
+            data_generator, workers=8, use_multiprocessing=self.multiprocessing_data_load, verbose=1)
 
         # calc mean scores and add to samples
         for i, sample in enumerate(samples):

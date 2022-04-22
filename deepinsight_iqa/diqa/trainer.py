@@ -11,9 +11,9 @@ from tensorflow.keras import losses as KLosses
 from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 import tensorflow.keras.backend as K
 from .networks.model import Diqa, BaseModel
-from .networks.utils import gradient, calculate_error_map, loss_fn
+from .networks.utils import gradient, calculate_error_map, loss_fn, SpearmanCorrMetric
 from deepinsight_iqa.common.utility import get_stream_handler
-from deepinsight_iqa.data_pipeline.diqa_gen.diqa_datagen import DiqaDataGenerator
+from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaDataGenerator
 
 logger = logging.getLogger(__name__)
 logger.addHandler(get_stream_handler())
@@ -45,23 +45,30 @@ def generate_random_name(batch_size, epochs):
 
 
 class TrainerStep:
-    def __init__(self, model, name, is_training: bool = False, optimizer=None, **kwds) -> None:
+    def __init__(self, model, name, is_training: bool = False, **kwds) -> None:
         self.model = model  # type: BaseModel
         self.loss = KMetric.Mean(name=f'{name}_loss', dtype=tf.float32)
-        self.accuracy = KMetric.MeanSquaredError(name=f'{name}_accuracy')
+        # self.accuracy = KMetric.MeanSquaredError(name=f'{name}_accuracy')
+        self.accuracy = SpearmanCorrMetric(name=f'{name}_accuracy')
         self.is_training = is_training
-        self.optimizer = optimizer
         self.scaling_factor = kwds['scaling_factor']
 
-    def __call__(self, I_d, I_r):
-        I_d, e_gt, r = calculate_error_map(I_d, I_r, scaling_factor=self.scaling_factor)
+    def __call__(self, distorted, reference):
+        reference = tf.slice(reference, begin=[0, 0, 0, 0], size=(reference.shape[:-1] + [1]))
+        distorted_gray = tf.slice(distorted, begin=[0, 0, 0, 0], size=(distorted.shape[:-1] + [1]))
+        e_gt, r = calculate_error_map(distorted_gray, reference, scaling_factor=self.scaling_factor)
         if self.is_training:
-            loss_value, gradients = gradient(self.model, I_d, e_gt, r)
-            self.optimizer.apply_gradients(zip(gradients, self.model.trainable_weights))
+            loss_value, gradients = gradient(self.model, distorted, e_gt, r)
+            self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_weights))
         else:
-            loss_value = loss_fn(self.model, I_d, e_gt, r)
+            loss_value = loss_fn(self.model, distorted, e_gt, r)
+
         loss = self.loss(loss_value)
-        acc = self.accuracy(e_gt, self.model(I_d, objective_output=True))
+        err_pred = self.model(distorted, objective_output=True)
+        _shape = tf.TensorShape([e_gt.shape[0], tf.reduce_prod(e_gt.shape[1:]).numpy()])
+        acc = self.accuracy(tf.reshape(e_gt, shape=_shape),
+                            tf.reshape(err_pred, shape=_shape))
+
         return loss, acc
 
     def reset_states(self):
@@ -83,8 +90,7 @@ class Trainer:
         extra_epochs: int = 1,
         num_workers: int = 1,
         log_dir: str = 'logs',
-        custom: bool = False,
-        verbose: bool = False,
+        weight_fname: str = None,
         **kwargs
     ):
         """
@@ -98,7 +104,7 @@ class Trainer:
         4. Larger Batch size can be used for training
 
         """
-        self.bottleneck_layer_name = kwargs.pop('bottleneck', None)
+        self.bottleneck_layer = kwargs.pop('bottleneck', None)
         self.model_type = kwargs.pop('model_type', None)
         self.epochs = epochs
         self.model_dir = model_dir
@@ -111,7 +117,11 @@ class Trainer:
         self.num_workers = num_workers
         self.use_pretrained = use_pretrained
         self.kwargs = kwargs
-        self.diqa = Diqa(self.model_type, self.bottleneck_layer_name, custom=custom)
+        self.diqa = Diqa(
+            self.model_type,
+            self.bottleneck_layer,
+            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
+        )
 
         self.train_datagen = train_datagen  # type: DiqaDataGenerator
         self.valid_datagen = valid_datagen  # type: DiqaDataGenerator
@@ -126,15 +136,15 @@ class Trainer:
 
         network = kwargs.pop('network', 'subjective')
         if self.use_pretrained:
-            self.diqa.load_weights(self.model_dir, network)
+            saved_path = Path(self.model_dir, weight_fname)
+            self.diqa.load_weights(saved_path, network)
 
     def train_objective(self):
-        
+
         train_step = TrainerStep(
             self.diqa,
             "objective",
             is_training=True,
-            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
             scaling_factor=self.kwargs['scaling_factor']
         )
         valid_step = TrainerStep(
@@ -144,8 +154,8 @@ class Trainer:
             scaling_factor=self.kwargs['scaling_factor']
         )
 
-        tensorboard_callback = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
-        tensorboard_callback.set_model(self.diqa.objective_model)
+        tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
+        tbc.set_model(self.diqa.objective_model)
 
         # ## ## ## ## ## ## ## ## ## ##
         # BEGIN EPOCH
@@ -161,25 +171,21 @@ class Trainer:
                 if self.valid_datagen:
                     I_d_val, I_r_val, _ = self.valid_datagen[batch_idx]
                     val_loss, val_accuracy = valid_step(I_d_val, I_r_val)
-                
-                step_logs = {
-                    'lr': train_step.optimizer.lr,
+
+                tbc.on_batch_end(batch_idx, logs={
                     'loss': loss,
                     'accuracy': accuracy,
                     'val_loss': val_loss,
                     'val_accuracy': val_accuracy
-                }
-                tensorboard_callback.on_batch_end(batch_idx, logs=step_logs)
+                })
 
-            metrics = {
-                'lr': train_step.optimizer.lr,
+            tbc.on_epoch_end(epoch=epoch, logs={
                 'loss': train_step.loss.result(),
                 'accuracy': train_step.accuracy.result(),
                 'val_loss': valid_step.loss.result(),
                 'val_accuracy': valid_step.accuracy.result()
-            }
-            tensorboard_callback.on_epoch_end(epoch=epoch, logs=metrics)
-            
+            })
+
             if self.valid_datagen:
                 template = 'Epoch {}, Loss: {}, Accuracy: {}, Test Loss: {}, Test Accuracy: {}'
                 print(template.format(
@@ -196,7 +202,7 @@ class Trainer:
                     train_step.loss.result(),
                     train_step.accuracy.result() * 100,)
                 )
-            
+
             # Reset metrics every epoch
             train_step.reset_states()
             valid_step.reset_states()
@@ -206,7 +212,7 @@ class Trainer:
     def train_final(self):
         name = 'subjective'
 
-        tensorboard_callback = TensorBoard(log_dir=self.log_dir.as_posix(), histogram_freq=1)
+        tbc = TensorBoard(log_dir=self.log_dir.as_posix(), histogram_freq=1)
         model_checkpointer = ModelCheckpoint(
             filepath=self.model_dir,
             monitor='val_loss',
@@ -235,7 +241,7 @@ class Trainer:
             loss=KLosses.MeanSquaredError(name=f'{name}_losses'),
             metrics=[KMetric.MeanSquaredError(name=f'{name}_accuracy')]
         )
-        
+
         self.diqa.subjective_model.fit(
             train_datagen,
             validation_data=valid_datagen,
@@ -245,7 +251,7 @@ class Trainer:
             initial_epoch=self.epochs,
             use_multiprocessing=self.use_multiprocessing,
             workers=self.num_workers,
-            callbacks=[model_checkpointer, tensorboard_callback]
+            callbacks=[model_checkpointer, tbc]
         )
 
         self.diqa.save_pretrained(self.model_dir, prefix='subjective')

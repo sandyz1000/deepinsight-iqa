@@ -13,7 +13,6 @@ from deepinsight_iqa.diqa.predict import Prediction
 from deepinsight_iqa.diqa.trainer import Trainer
 
 
-
 def parse_config(job_dir, config_file):
     os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
     os.makedirs(os.path.join(job_dir, 'logs'), exist_ok=True)
@@ -26,7 +25,11 @@ job_dir = os.path.realpath(os.path.curdir)
 # ## Set image directory and path
 # %%
 image_dir, csv_path = "/Volumes/SDM/Dataset/iqa/techical", "combine.csv"
-config_file = os.path.realpath(os.path.join(job_dir, "configs/diqa/inceptionv3.json"))
+cfg_path = "configs/diqa/mobilenet.json"
+# cfg_path = "configs/diqa/inceptionv3.json"
+# cfg_path = "configs/diqa/resnetv2.json"
+
+config_file = os.path.realpath(os.path.join(job_dir, cfg_path))
 cfg = parse_config(job_dir, config_file)
 
 # %%
@@ -39,18 +42,22 @@ it = iter(train)
 X_dist, X_ref, Y = next(it)
 
 # %%
-trainer = Trainer(train, valid, **cfg)
-# %%
+network = cfg.pop('network', 'subjective')
+model_dir = cfg.pop('model_dir', 'weights/diqa')
+trainer = Trainer(train, valid, network=network, model_dir=model_dir, **cfg)
 
 
 # %%
-image_dir, csv_path = "/Volumes/SDM/Dataset/iqa", "tech-dataset/combine.csv"
+trainer.train_objective()
+
+# %%
+image_dir, csv_path = "/Volumes/SDM/Dataset/iqa", "technical/combine.csv"
 config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_inceptionv3.json"))
 cfg = parse_config(job_dir, config_file)
 model_dir = os.path.join(os.path.expanduser('~/Documents/utilities-github/deepinsight-iqa'), cfg['model_dir'])
 prediction = Prediction(
     model_dir=model_dir, subjective_weightfname=cfg['subjective_weightfname'],
-    base_model_name=cfg['base_model_name']
+    model_type=cfg['base_model_name']
 )
 
 # %%

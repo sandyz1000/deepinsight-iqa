@@ -1,6 +1,8 @@
 import tensorflow as tf
+from scipy.stats import spearmanr
+from tensorflow.keras import metrics as KMetric
 from ..utils.tf_imgutils import rescale
-
+from functools import partial
 
 def error_map(reference: tf.Tensor, distorted: tf.Tensor, p: float = 0.2) -> tf.Tensor:
     """
@@ -106,7 +108,29 @@ def gradient(model, x, y_true, r):
 #     e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
 #     return (I_d, e_gt, r)
 
-def calculate_error_map(I_d: tf.Tensor, I_r: tf.Tensor, scaling_factor: float = 1. / 32):
+def calculate_error_map(
+    I_d: tf.Tensor,
+    I_r: tf.Tensor,
+    scaling_factor: float = 1. / 32
+):
     r = rescale(average_reliability_map(I_d, 0.2), scaling_factor)
     e_gt = rescale(error_map(I_r, I_d, 0.2), scaling_factor)
-    return (I_d, e_gt, r)
+    return e_gt, r
+
+
+class SpearmanCorrMetric(KMetric.Metric):
+    def __init__(self, name='spearman-corr', dtype=None, **kwargs):
+        super(SpearmanCorrMetric, self).__init__(name, dtype, **kwargs)
+        self.corr_score = self.add_weight(name='corr-score', initializer='zeros')
+
+    def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor):
+        _spearmanr = partial(spearmanr, axis=None)
+        self.corr_score.assign_add(
+            tf.py_function(
+                _spearmanr,
+                inp=[tf.cast(y_pred, tf.float32), tf.cast(y_true, tf.float32)],
+                Tout=tf.float32
+            ))
+
+    def result(self):
+        return self.corr_score

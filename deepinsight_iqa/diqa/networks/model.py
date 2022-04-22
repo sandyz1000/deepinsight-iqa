@@ -106,9 +106,11 @@ class Diqa(BaseModel):
         shape=(None, None, 1),
         batch_size=1,
         in_layer_name='original_image',
+        optimizer=None,
         **kwds
     ) -> None:
         super(Diqa, self).__init__()
+        self.optimizer = optimizer
         bottleneck = get_bottleneck(
             model_type=model_type,
             bottleneck_layer_name=bottleneck_layer_name,
@@ -160,8 +162,8 @@ class Diqa(BaseModel):
         else:
             self.__subjective_net.save_weights(model_path)
 
-    def load_weights(self, saved_path: str, prefix):
-        model_path = self.__get_model_fname(saved_path, prefix)
+    def load_weights(self, model_path: str, prefix):
+        
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model path {model_path} not found")
 
@@ -173,14 +175,13 @@ class Diqa(BaseModel):
 
 class ObjectiveModel(KM.Model):
     """
-    ## Objective Error Model
+    ## Objective Error Model AKA "objective_error_map"
     For the training phase, it is convenient to utilize the *tf.data* input pipelines to produce a 
     much cleaner and readable code. The only requirement is to create the function to apply to the input.
     """
 
     def __init__(self, bottleneck: KM.Model, custom: bool = False) -> None:
         super(ObjectiveModel, self).__init__()
-        
         self.custom = custom
         self.bottleneck = bottleneck
         if self.custom:
