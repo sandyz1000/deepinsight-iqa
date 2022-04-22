@@ -3,6 +3,8 @@ from scipy.stats import spearmanr
 from tensorflow.keras import metrics as KMetric
 from ..utils.tf_imgutils import rescale
 from functools import partial
+import tensorflow_probability as tfp
+
 
 def error_map(reference: tf.Tensor, distorted: tf.Tensor, p: float = 0.2) -> tf.Tensor:
     """
@@ -123,14 +125,24 @@ class SpearmanCorrMetric(KMetric.Metric):
         super(SpearmanCorrMetric, self).__init__(name, dtype, **kwargs)
         self.corr_score = self.add_weight(name='corr-score', initializer='zeros')
 
-    def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor):
+    def update_state_spearman(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         _spearmanr = partial(spearmanr, axis=None)
-        self.corr_score.assign_add(
-            tf.py_function(
-                _spearmanr,
-                inp=[tf.cast(y_pred, tf.float32), tf.cast(y_true, tf.float32)],
-                Tout=tf.float32
-            ))
+        value = tf.py_function(
+            _spearmanr,
+            inp=[tf.cast(y_pred, tf.float32), tf.cast(y_true, tf.float32)],
+            Tout=tf.float32
+        )
+        # rho = value.rho
+        self.corr_score.assign_add(value)
+    
+    def update_state_pearson(self, y_true: tf.Tensor, y_pred: tf.Tensor):
+        return tfp.stats.correlation(y_true, y_pred, sample_axis=0, event_axis=None)
+
+    def update_state(self, y_true, y_pred):
+        return self.update_state_spearman(y_true, y_pred)
 
     def result(self):
         return self.corr_score
+
+
+

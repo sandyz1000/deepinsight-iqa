@@ -9,3 +9,4 @@ scikit-image
 imgaug
 click
 tensorflow_datasets
+tensorflow-probability

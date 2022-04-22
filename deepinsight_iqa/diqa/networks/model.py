@@ -82,20 +82,22 @@ def get_bottleneck(model_type: str, *, bottleneck_layer_name: str = None, **kwds
             "MobileNet": KA.MobileNet,
             "InceptionResNetV2": KA.InceptionResNetV2
         }
+    
     if model_type == IMAGENET_MODEL_TYPE:
 
         model_params = dict(input_shape=(None, None, 3), include_top=False, weights="imagenet")
         if bottleneck_layer_name not in mapping.keys():
             raise ValueError("Invalid model_name, enter from given options ")
 
-        model = mapping[bottleneck_layer_name](**model_params)
+        model = mapping[bottleneck_layer_name](**model_params)  # type: KM.Model
 
     elif model_type == CUSTOM_MODEL_TYPE:
         model = CustomModel(**kwds)
 
     else:
         raise AttributeError("Invalid model options ", {model_type})
-
+    
+    model.trainable = kwds.get('train_bottleneck', False)
     return model
 
 
@@ -108,7 +110,7 @@ class Diqa(BaseModel):
         batch_size=1,
         in_layer_name='original_image',
         optimizer=None,
-        **kwds
+        train_bottleneck=False
     ) -> None:
         super(Diqa, self).__init__()
         self.optimizer = optimizer
@@ -117,7 +119,8 @@ class Diqa(BaseModel):
             bottleneck_layer_name=bottleneck_layer_name,
             shape=shape,
             batch_size=batch_size,
-            in_layer_name=in_layer_name
+            in_layer_name=in_layer_name,
+            train_bottleneck=train_bottleneck
         )
         self.custom = True if model_type == CUSTOM_MODEL_TYPE else False
         # Initialize objective and subjective model for training/inference

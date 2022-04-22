@@ -120,7 +120,8 @@ class Trainer:
         self.diqa = Diqa(
             self.model_type,
             self.bottleneck_layer,
-            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4)
+            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
+            train_bottleneck=kwargs.pop('train_bottleneck', False)
         )
 
         self.train_datagen = train_datagen  # type: DiqaDataGenerator
@@ -138,6 +139,8 @@ class Trainer:
         if self.use_pretrained:
             self.diqa.load_weights(self.model_dir, weight_file, prefix=network)
 
+        self.__state_name = None
+    
     def train_objective(self):
 
         train_step = TrainerStep(
@@ -205,9 +208,11 @@ class Trainer:
             # Reset metrics every epoch
             train_step.reset_states()
             valid_step.reset_states()
+        
+        self.__state_name = 'objective'
 
-    def save_weights(self, prefix='subjective'):
-        self.diqa.save_pretrained(self.model_dir, prefix=prefix)
+    def save_weights(self):
+        self.diqa.save_pretrained(self.model_dir, prefix=self.__state_name)
 
     def train_final(self):
         name = 'subjective'
@@ -253,4 +258,6 @@ class Trainer:
             workers=self.num_workers,
             callbacks=[model_checkpointer, tbc]
         )
+        
+        self.__state_name = 'subjective'
 
