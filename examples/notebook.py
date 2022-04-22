@@ -4,43 +4,42 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
-import json
+from pathlib import Path
 import tensorflow as tf
 sys.path.append(os.path.realpath(os.path.pardir))
 from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_normalization, image_preprocess
 from deepinsight_iqa.diqa.predict import Prediction
 from deepinsight_iqa.diqa.trainer import Trainer
-
-
-def parse_config(job_dir, config_file):
-    os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
-    os.makedirs(os.path.join(job_dir, 'logs'), exist_ok=True)
-    config = json.load(open(config_file, 'r'))
-    return config
+from deepinsight_iqa.cli import parse_config
 
 
 job_dir = os.path.realpath(os.path.curdir)
 # %% [markdown]
 # ## Set image directory and path
 # %%
-image_dir, csv_path = "/Volumes/SDM/Dataset/iqa/techical", "combine.csv"
+image_dir = "/Volumes/SDM/Dataset/iqa/technical"
+csv_path = "combine.csv"
 cfg_path = "configs/diqa/mobilenet.json"
 # cfg_path = "configs/diqa/inceptionv3.json"
 # cfg_path = "configs/diqa/resnetv2.json"
 
-config_file = os.path.realpath(os.path.join(job_dir, cfg_path))
-cfg = parse_config(job_dir, config_file)
+resolve_config_path = (lambda cfg_path: Path(os.path.dirname(__file__)).parent / cfg_path)
+cfg = parse_config(resolve_config_path(cfg_path))
 
 # %%
 train, valid = get_iqa_datagen(
-    image_dir, csv_path, do_augment=cfg['use_augmentation'],
-    image_preprocess=image_preprocess, input_size=cfg['input_size']
+    image_dir, 
+    os.path.join(image_dir, csv_path),
+    do_augment=cfg['use_augmentation'],
+    image_preprocess=image_preprocess, 
+    input_size=cfg['input_size'],
+    do_train=True
 )
 # %%
 it = iter(train)
 X_dist, X_ref, Y = next(it)
-
+plt.imshow(X_ref[0], cmap='gray')
 # %%
 network = cfg.pop('network', 'subjective')
 model_dir = cfg.pop('model_dir', 'weights/diqa')

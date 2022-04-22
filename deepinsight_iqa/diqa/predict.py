@@ -43,12 +43,12 @@ class Prediction:
         **kwds
     ):
         try:
-            self.channel_dim: int = 3,
+            self.channel_dim = 3
             bottleneck_layer_name = kwds.pop('bottleneck', None)
             self.diqa = Diqa(model_type, bottleneck_layer_name)
             network = kwds.pop('network', 'subjective')
 
-            self.diqa.load_weights(Path(model_dir, weight_filename), prefix=network)
+            self.diqa.load_weights(model_dir, weight_filename, prefix=network)
         except Exception as e:
             print("Unable to load DIQA model, check model path", str(e))
             sys.exit(1)

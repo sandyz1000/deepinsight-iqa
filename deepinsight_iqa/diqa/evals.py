@@ -1,12 +1,10 @@
-import os
 import six
 import numpy as np
 import tensorflow as tf
-from typing import Union, Iterator, Tuple, Optional
+from typing import Union, Tuple, Optional
 from deepinsight_iqa.common.utility import thread_safe_singleton
 from .networks.model import Diqa
 from deepinsight_iqa.diqa.data import get_iqa_datagen
-from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaCombineDataGen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.networks.utils import SpearmanCorrMetric
 from pathlib import Path
@@ -17,7 +15,6 @@ import pandas as pd
 class Evaluation:
     def __init__(
         self,
-        # datagen: Union[DiqaCombineDataGen, tf.data.Dataset, Iterator],
         model_dir: Optional[str] = None,
         weight_filename: Optional[str] = None,
         model_type: str = None,
@@ -34,11 +31,10 @@ class Evaluation:
         self.out_path = out_path
         
         bottleneck_layer_name = kwargs.pop('bottleneck', None)
-        network = kwargs.pop('network', 'subjective')
 
         self.diqa = Diqa(model_type, bottleneck_layer_name)
         self.metric = SpearmanCorrMetric()
-        self.diqa.load_weights(Path(model_dir, weight_filename), prefix=network)
+        self.diqa.load_weights(model_dir, weight_filename, prefix='subjective')
 
     def img_pair_score(
         self,
@@ -62,6 +58,11 @@ class Evaluation:
         ref_prediction = self.diqa.subjective_model.predict(I_r)[0][0]
         return dist_prediction, ref_prediction
 
+    def save_json(self, data, target_file):
+        import json
+        with Path(target_file).open('w') as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+
     def __call__(self, image_dir, csv_path=None, prediction_file=None):
         
         datagen = get_iqa_datagen(
@@ -77,13 +78,24 @@ class Evaluation:
             split_dataset=False
         )
         
-        # nb_samples = len(datagen)
-        predictions = self.diqa.subjective_model.predict_generator(self.datagen)
-        true_values = pd.read_csv(csv_path)['mos'].values
-        # TODO: Write to prediction file
-        for pred, true_val in zip(predictions, true_values):
-            self.metric.update_state(pred, true_val)
+        nb_samples = len(datagen)
+        predictions = self.diqa.subjective_model.predict_generator(datagen)
+        df = pd.read_csv(csv_path)
+        outputs = []
+        for idx in range(nb_samples):
+            pred = predictions[idx]
+            gt = df['mos']
+            outputs.append({
+                "gt": gt,
+                "pred": pred,
+                "reference_image": df["reference_image"],
+                "distorted_image": df["distorted_image"]
+            })
+            self.metric.update_state(pred, gt)
 
+        self.save_json(outputs, prediction_file)
         result = self.metric.result()
         self.metric.reset_states()
+        print(f">> Overall Score: {result} >>")
+        
         return result

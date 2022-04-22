@@ -1,6 +1,7 @@
 import typing as tp
 import os
 import time
+from pathlib import Path
 import tensorflow as tf
 import tensorflow.keras.layers as KL
 import tensorflow.keras.applications as KA
@@ -162,10 +163,13 @@ class Diqa(BaseModel):
         else:
             self.__subjective_net.save_weights(model_path)
 
-    def load_weights(self, model_path: str, prefix):
+    def load_weights(self, model_dir: Path, model_path: Path, prefix):
         
         if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model path {model_path} not found")
+            model_path = Path(model_dir) / model_path
+
+            assert model_path.exists(), \
+                FileNotFoundError(f"Model path {model_path} not found")
 
         if prefix == OBJECTIVE_NW:
             self.__objective_net.load_weights(model_path)

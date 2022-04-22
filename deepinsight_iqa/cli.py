@@ -37,7 +37,7 @@ def prepare_tf_record(dataset_type, image_dir, input_file):
 @click.option('-i', '--image_filepath', help='directory with image files', required=True)
 def predict(algo, conf_file, base_dir, weight_file, image_filepath):
     # Script use to predict Image quality using Deep image quality assesement
-    cfg = parse_config(base_dir, conf_file)
+    cfg = parse_config(conf_file)
     if algo == "nima":
         prediction = NimaPrediction(
             weights_file=Path(base_dir, weight_file),
@@ -65,10 +65,8 @@ def predict(algo, conf_file, base_dir, weight_file, image_filepath):
     return 0
 
 
-def parse_config(job_dir, config_file):
-    os.makedirs(os.path.join(job_dir, 'weights'), exist_ok=True)
-    os.makedirs(os.path.join(job_dir, 'logs'), exist_ok=True)
-    config = json.load(open(os.path.join(job_dir, config_file), 'r'))
+def parse_config(config_file):
+    config = json.load(Path(config_file).open('r'))
     return config
 
 
@@ -92,7 +90,7 @@ def train(
 ):
     from deepinsight_iqa.common.utility import set_gpu_limit
     # set_gpu_limit(10)
-    cfg = parse_config(base_dir, conf_file)  # type: Dict
+    cfg = parse_config(conf_file)  # type: Dict
 
     def train_diqa(
         image_dir,
@@ -114,6 +112,7 @@ def train(
             input_file,
             dataset_type=dataset_type,
             image_preprocess=image_preprocess,
+            do_train=True,
             input_size=cfg['input_size'],
             do_augment=cfg['use_augmentation'],
             channel_dim=cfg['channel_dim'],
@@ -125,7 +124,7 @@ def train(
             valid_datagen=valid_generator,
             model_dir=model_dir,
             network=network,
-            weight_fname=weight_fname,
+            weight_file=weight_fname,
             **cfg
         )
 
@@ -171,7 +170,7 @@ def train(
 @click.option('-f', '--input_csv', help='input csv/json file', required=True)
 @click.option('-i', '--image_dir', help='directory with image files', required=True)
 def evaluate(algo, conf_file, base_dir, weight_file, input_csv, image_dir):
-    cfg = parse_config(base_dir, conf_file)
+    cfg = parse_config(conf_file)
     if algo == "nima":
 
         evaluator = NimaEvaluation(
@@ -183,17 +182,14 @@ def evaluate(algo, conf_file, base_dir, weight_file, input_csv, image_dir):
 
     elif algo == "diqa":
 
-        cf_model_dir = cfg.pop('model_dir', 'weights/diqa')
-        cf_network = cfg.pop('network', SUBJECTIVE_NW)
+        model_dir = cfg.pop('model_dir', 'weights/diqa')
 
-        network = network if network else cf_network
-        model_dir = base_dir if base_dir else cf_model_dir
+        model_dir = base_dir if base_dir else model_dir
 
         evaluator = DiqaEvaluation(
             model_dir=model_dir,
             weight_filename=weight_file,
             model_type=cfg['model_type'],
-            network=network,
             batch_size=cfg['batch_size'],
             kwargs=cfg
         )

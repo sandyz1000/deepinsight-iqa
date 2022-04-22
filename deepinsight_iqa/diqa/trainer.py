@@ -90,7 +90,7 @@ class Trainer:
         extra_epochs: int = 1,
         num_workers: int = 1,
         log_dir: str = 'logs',
-        weight_fname: str = None,
+        weight_file: str = None,
         **kwargs
     ):
         """
@@ -136,8 +136,7 @@ class Trainer:
 
         network = kwargs.pop('network', 'subjective')
         if self.use_pretrained:
-            saved_path = Path(self.model_dir, weight_fname)
-            self.diqa.load_weights(saved_path, network)
+            self.diqa.load_weights(self.model_dir, weight_file, prefix=network)
 
     def train_objective(self):
 
@@ -207,7 +206,8 @@ class Trainer:
             train_step.reset_states()
             valid_step.reset_states()
 
-        self.diqa.save_pretrained(self.model_dir, prefix='objective')
+    def save_weights(self, prefix='subjective'):
+        self.diqa.save_pretrained(self.model_dir, prefix=prefix)
 
     def train_final(self):
         name = 'subjective'
@@ -254,4 +254,3 @@ class Trainer:
             callbacks=[model_checkpointer, tbc]
         )
 
-        self.diqa.save_pretrained(self.model_dir, prefix='subjective')
