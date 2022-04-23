@@ -48,8 +48,8 @@ class TrainerStep:
     def __init__(self, model, name, is_training: bool = False, **kwds) -> None:
         self.model = model  # type: BaseModel
         self.loss = KMetric.Mean(name=f'{name}_loss', dtype=tf.float32)
-        # self.accuracy = KMetric.MeanSquaredError(name=f'{name}_accuracy')
-        self.accuracy = SpearmanCorrMetric(name=f'{name}_accuracy')
+        self.accuracy = KMetric.MeanSquaredError(name=f'{name}_accuracy')
+        # self.accuracy = SpearmanCorrMetric(name=f'{name}_accuracy')
         self.is_training = is_training
         self.scaling_factor = kwds['scaling_factor']
 
@@ -66,8 +66,10 @@ class TrainerStep:
         loss = self.loss(loss_value)
         err_pred = self.model(distorted, objective_output=True)
         _shape = tf.TensorShape([e_gt.shape[0], tf.reduce_prod(e_gt.shape[1:]).numpy()])
-        acc = self.accuracy(tf.reshape(e_gt, shape=_shape),
-                            tf.reshape(err_pred, shape=_shape))
+
+        err_pred = tf.reshape(err_pred, shape=_shape)
+        e_gt = tf.reshape(e_gt, shape=_shape)
+        acc = self.accuracy(e_gt, err_pred)
 
         return loss, acc
 
@@ -127,11 +129,11 @@ class Trainer:
         self.train_datagen = train_datagen  # type: DiqaDataGenerator
         self.valid_datagen = valid_datagen  # type: DiqaDataGenerator
 
-        if kwargs['steps_per_epoch']:
+        if 'steps_per_epoch' in kwargs:
             self.train_datagen.steps_per_epoch = min(kwargs['steps_per_epoch'],
                                                      self.train_datagen.steps_per_epoch)
 
-        if kwargs['validation_steps']:
+        if 'validation_steps' in kwargs:
             self.valid_datagen.steps_per_epoch = min(kwargs['validation_steps'],
                                                      self.valid_datagen.steps_per_epoch)
 
@@ -140,7 +142,7 @@ class Trainer:
             self.diqa.load_weights(self.model_dir, weight_file, prefix=network)
 
         self.__state_name = None
-    
+
     def train_objective(self):
 
         train_step = TrainerStep(
@@ -164,7 +166,8 @@ class Trainer:
         # ## ## ## ## ## ## ## ## ## ##
 
         for epoch in tqdm.tqdm(range(self.epochs), bar_format='{desc:<5.5}{percentage:3.0f}%|{bar:20}{r_bar}'):
-            min_step_count = min(self.train_datagen.steps_per_epoch, self.valid_datagen.steps_per_epoch)
+            min_step_count = min(self.train_datagen.steps_per_epoch,
+                                 self.valid_datagen.steps_per_epoch)
             for batch_idx in range(min_step_count):
 
                 I_d, I_r, mos = self.train_datagen[batch_idx]
@@ -208,7 +211,7 @@ class Trainer:
             # Reset metrics every epoch
             train_step.reset_states()
             valid_step.reset_states()
-        
+
         self.__state_name = 'objective'
 
     def save_weights(self):
@@ -258,6 +261,5 @@ class Trainer:
             workers=self.num_workers,
             callbacks=[model_checkpointer, tbc]
         )
-        
-        self.__state_name = 'subjective'
 
+        self.__state_name = 'subjective'

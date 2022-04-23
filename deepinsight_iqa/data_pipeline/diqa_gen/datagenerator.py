@@ -408,7 +408,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         self.img_crop_dims = img_crop_dims
         self.do_augment = do_augment
         self.data_generator = self.__train_generator if self.do_train else self.__batch_generator
-        self.steps_per_epoch = np.floor(len(self.samples) / self.batch_size)
+        self.steps_per_epoch = int(np.floor(len(self.samples) / self.batch_size))
         self.on_epoch_end()
 
     def __len__(self):
@@ -437,7 +437,8 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
                 i_d, i_r = [tf.squeeze(self.img_preprocessing(im), axis=0) for im in [i_d, i_r]]
 
             i_d, i_r = [
-                tf.tile(im, (1, 1, self.channel_dim)) if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
+                tf.tile(im, (1, 1, self.channel_dim))
+                if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
                 for im in [i_d, i_r]
             ]
             if self.do_augment:

@@ -36,16 +36,10 @@ class BaseModel(tf.keras.Model):
 
 
 class CustomModel(KM.Model):
-    def __init__(
-        self,
-        shape: tp.Union[tf.TensorShape, tp.Tuple] = (None, None, 1),
-        batch_size: int = 1,
-        in_layer_name: str = 'original_image',
-        **kwds
-    ) -> None:
+    def __init__(self, **kwds):
         super(CustomModel, self).__init__()
+        self.kwds = kwds
 
-        self.input = KL.InputLayer(shape=shape, batch_size=batch_size, name=in_layer_name)
         self.conv1 = KL.Conv2D(48, (3, 3), name='Conv1', activation='relu', padding='same')
         self.conv2 = KL.Conv2D(48, (3, 3), name='Conv2', activation='relu', padding='same', strides=(2, 2))
         self.conv3 = KL.Conv2D(64, (3, 3), name='Conv3', activation='relu', padding='same')
@@ -56,8 +50,7 @@ class CustomModel(KM.Model):
         self.conv8 = KL.Conv2D(128, (3, 3), name='bottleneck', activation='relu', padding='same', strides=(2, 2))
 
     def call(self, inputs: tf.Tensor):
-        out = self.input(inputs)
-        out = self.conv1(out)
+        out = self.conv1(inputs)
         out = self.conv2(out)
         out = self.conv3(out)
         out = self.conv4(out)
@@ -69,7 +62,12 @@ class CustomModel(KM.Model):
         return out
 
 
-def get_bottleneck(model_type: str, *, bottleneck_layer_name: str = None, **kwds) -> KM.Model:
+def get_bottleneck(
+    model_type: str, *,
+    bottleneck: str = None,
+    train_bottleneck: bool = True,
+    kwds={}
+) -> KM.Model:
     """Get the bottleneck layer given the name
 
     :param _type_ model_name: _description_
@@ -82,22 +80,22 @@ def get_bottleneck(model_type: str, *, bottleneck_layer_name: str = None, **kwds
             "MobileNet": KA.MobileNet,
             "InceptionResNetV2": KA.InceptionResNetV2
         }
-    
+
     if model_type == IMAGENET_MODEL_TYPE:
 
         model_params = dict(input_shape=(None, None, 3), include_top=False, weights="imagenet")
-        if bottleneck_layer_name not in mapping.keys():
+        if bottleneck not in mapping.keys():
             raise ValueError("Invalid model_name, enter from given options ")
 
-        model = mapping[bottleneck_layer_name](**model_params)  # type: KM.Model
+        model = mapping[bottleneck](**model_params)  # type: KM.Model
 
     elif model_type == CUSTOM_MODEL_TYPE:
-        model = CustomModel(**kwds)
+        model = CustomModel(**kwds)  # type: KM.Model
 
     else:
         raise AttributeError("Invalid model options ", {model_type})
-    
-    model.trainable = kwds.get('train_bottleneck', False)
+
+    model.trainable = train_bottleneck
     return model
 
 
@@ -105,22 +103,18 @@ class Diqa(BaseModel):
     def __init__(
         self,
         model_type: str,
-        bottleneck_layer_name: str,
-        shape=(None, None, 1),
-        batch_size=1,
-        in_layer_name='original_image',
+        bn_layer: str,
         optimizer=None,
-        train_bottleneck=False
+        train_bottleneck=False,
+        kwds={}
     ) -> None:
         super(Diqa, self).__init__()
         self.optimizer = optimizer
         bottleneck = get_bottleneck(
             model_type=model_type,
-            bottleneck_layer_name=bottleneck_layer_name,
-            shape=shape,
-            batch_size=batch_size,
-            in_layer_name=in_layer_name,
-            train_bottleneck=train_bottleneck
+            bottleneck=bn_layer,
+            train_bottleneck=train_bottleneck,
+            kwds=kwds
         )
         self.custom = True if model_type == CUSTOM_MODEL_TYPE else False
         # Initialize objective and subjective model for training/inference
@@ -167,7 +161,7 @@ class Diqa(BaseModel):
             self.__subjective_net.save_weights(model_path)
 
     def load_weights(self, model_dir: Path, model_path: Path, prefix):
-        
+
         if not os.path.exists(model_path):
             model_path = Path(model_dir) / model_path
 

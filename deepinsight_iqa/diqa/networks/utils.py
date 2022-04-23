@@ -110,6 +110,7 @@ def gradient(model, x, y_true, r):
 #     e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
 #     return (I_d, e_gt, r)
 
+@tf.function
 def calculate_error_map(
     I_d: tf.Tensor,
     I_r: tf.Tensor,
@@ -136,10 +137,10 @@ class SpearmanCorrMetric(KMetric.Metric):
         self.corr_score.assign_add(value)
     
     def update_state_pearson(self, y_true: tf.Tensor, y_pred: tf.Tensor):
-        return tfp.stats.correlation(y_true, y_pred, sample_axis=0, event_axis=None)
+        return tfp.stats.correlation(y_true, y_pred, sample_axis=None, event_axis=None)
 
     def update_state(self, y_true, y_pred):
-        return self.update_state_spearman(y_true, y_pred)
+        return self.update_state_pearson(y_true, y_pred)
 
     def result(self):
         return self.corr_score

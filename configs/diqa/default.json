@@ -1,20 +1,17 @@
 {
-	"model_dir": "weights/diqa/resnet",
+	"model_dir": "weights/diqa",
 	"network": "subjective",
-	"log_dir": "logs/resnetv2", 
-	"bottleneck": "InceptionResNetV2",
-	"model_type": "imagenet",
+	"log_dir": "logs/custom",
+	"model_type": "diqa_custom",
 	"dataset_type": null,
 	"existing_weights": null,
 	"use_augmentation": true,
-	"batch_size": 8,
+	"batch_size": 1,
 	"use_pretrained": false,
 	"channel_dim": 3,
 	"train_bottleneck": true,
 	"epochs": 10,
 	"extra_epochs": 10,
-	"steps_per_epoch": 100,
-	"validation_steps": 100,
 	"learning_rate_dense": 0.001,
 	"decay_dense": 0,
 	"learning_rate_all": 0.00003,
@@ -24,6 +21,6 @@
 	"multiprocessing_data_load": true,
 	"num_workers_data_load": 2,
 	"custom": false,
-	"input_size": [416, 416],
-	"scaling_factor": 0.026315
+	"input_size": null,
+	"scaling_factor": 0.25
 }
