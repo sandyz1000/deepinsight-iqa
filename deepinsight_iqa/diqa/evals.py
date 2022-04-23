@@ -7,6 +7,8 @@ from .networks.model import Diqa
 from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.networks.utils import SpearmanCorrMetric
+from .networks.utils import loss_fn
+from tensorflow.keras import losses as KLosses
 from pathlib import Path
 import pandas as pd
 
@@ -16,7 +18,7 @@ class Evaluation:
     def __init__(
         self,
         model_dir: Optional[str] = None,
-        weight_filename: Optional[str] = None,
+        weight_file: Optional[str] = None,
         model_type: str = None,
         batch_size: int = 1,
         out_path: str = "report.csv",
@@ -29,12 +31,23 @@ class Evaluation:
         self.kwargs = kwargs
         self.batch_size = kwargs.pop('batch_size', batch_size)
         self.out_path = out_path
-        
-        bottleneck_layer_name = kwargs.pop('bottleneck', None)
 
+        bottleneck_layer_name = kwargs.pop('bottleneck', None)
         self.diqa = Diqa(model_type, bottleneck_layer_name)
+        cond_loss_fn = (
+            loss_fn
+            if self.network == 'objective'
+            else KLosses.MeanSquaredError(name=f'{self.network}_losses')
+        )
+
+        self.diqa.compile(
+            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
+            loss_fn=cond_loss_fn,
+            current_ops=self.network
+        )
+        model_path = Path(model_dir) / weight_file
+        self.diqa.load_weights(model_path)
         self.metric = SpearmanCorrMetric()
-        self.diqa.load_weights(model_dir, weight_filename, prefix='subjective')
 
     def img_pair_score(
         self,
@@ -51,7 +64,7 @@ class Evaluation:
         Returns:
             [type]: [description]
         """
-        
+
         I_d = image_preprocess(distorted_image)
         I_r = image_preprocess(reference_image)
         dist_prediction = self.diqa.subjective.predict(I_d)[0][0]
@@ -64,7 +77,7 @@ class Evaluation:
             json.dump(data, f, indent=2, sort_keys=True)
 
     def __call__(self, image_dir, csv_path=None, prediction_file=None):
-        
+
         datagen = get_iqa_datagen(
             image_dir,
             csv_path,
@@ -77,9 +90,9 @@ class Evaluation:
             batch_size=self.batch_size,
             split_dataset=False
         )
-        
+
         nb_samples = len(datagen)
-        predictions = self.diqa.subjective.predict_generator(datagen)
+        predictions = self.diqa.predict_generator(datagen)
         df = pd.read_csv(csv_path)
         outputs = []
         for idx in range(nb_samples):
@@ -97,5 +110,5 @@ class Evaluation:
         result = self.metric.result()
         self.metric.reset_states()
         print(f">> Overall Score: {result} >>")
-        
+
         return result

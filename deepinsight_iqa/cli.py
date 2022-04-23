@@ -55,7 +55,7 @@ def predict(algo, conf_file, base_dir, weight_file, image_filepath):
 
         prediction = DiqaPrediction(
             model_dir=model_dir,
-            weight_filename=weight_file,
+            weight_file=weight_file,
             model_type=cfg['model_type'],
             network=network
         )
@@ -127,13 +127,12 @@ def train(
             weight_file=weight_fname,
             **cfg
         )
-
-        if network == OBJECTIVE_NW:
-            trainer.train_objective()
-            return 0
-
-        trainer.train_final()
-        trainer.save_weights()
+        diqa = trainer.compile(train_bottleneck=cfg['train_bottleneck'])
+        if trainer.use_pretrained:
+            trainer.load_weights(diqa)
+        
+        trainer.slow_trainer(diqa)
+        trainer.save_weights(diqa)
 
     def train_nima(cfg, image_dir, base_dir, input_file):
         samples_file = os.path.join(base_dir, input_file)
@@ -189,7 +188,7 @@ def evaluate(algo, conf_file, base_dir, weight_file, input_csv, image_dir):
 
         evaluator = DiqaEvaluation(
             model_dir=model_dir,
-            weight_filename=weight_file,
+            weight_file=weight_file,
             model_type=cfg['model_type'],
             batch_size=cfg['batch_size'],
             kwargs=cfg

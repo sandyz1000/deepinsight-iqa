@@ -1,6 +1,8 @@
 # %%
 %load_ext autoreload
 %autoreload 2
+%reload_ext autoreload
+# %%
 import os
 import sys
 import matplotlib.pyplot as plt
@@ -43,27 +45,35 @@ train, valid = get_iqa_datagen(
 )
 # %%
 it = iter(train)
-X_dist, X_ref, Y = next(it)
-# %%
+X_dist, dist_gray, X_ref, Y = next(it)
 plt.imshow(X_ref[0], cmap='gray')
 # %%
-network = cfg.pop('network', 'subjective')
+network = 'objective'
+cfg.pop('network')
 model_dir = cfg.pop('model_dir', 'weights/diqa')
-weight_file = cfg.pop('weight_file', 'objective-model-custom-1650708810.9949222.h5')
+
 # %%
+
 trainer = Trainer(
     train, valid,
     network=network,
     model_dir=model_dir,
-    weight_file=weight_file,
     **cfg
 )
-
+diqa = trainer.compile(train_bottleneck=True)
+# %%
+# weight_file = cfg.pop('weight_file', 'objective-model-custom-1650708810.9949222.h5')
+# model_path = Path(model_dir) / weight_file
+# diqa.build(input_shape=(None, None, 1))
+# trainer.load_weights(diqa, model_path)
 
 # %%
-trainer.train_objective()
+# trainer.train(diqa)
 # %%
-trainer.save_weights()
+trainer.slow_trainer(diqa)
+# %%
+# trainer.save_weights(diqa)
+diqa.save("temp-1", save_format='tf')
 # %%
 image_dir, csv_path = "/Volumes/SDM/Dataset/iqa", "technical/combine.csv"
 config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_inceptionv3.json"))

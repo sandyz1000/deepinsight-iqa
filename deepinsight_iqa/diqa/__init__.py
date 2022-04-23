@@ -5,7 +5,7 @@ __author__ = "Sandip Dey"
 CUSTOM_MODEL_TYPE = "diqa_custom"
 IMAGENET_MODEL_TYPE = 'imagenet'
 
-MODEL_FILE_NAME = "model.h5"
+MODEL_FILE_NAME = "diqa"
 CONFIG_FILE_NAME = "config.yml"
 
 SUBJECTIVE_NW = 'subjective'

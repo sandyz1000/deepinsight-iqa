@@ -11,6 +11,8 @@ from typing import Union, Tuple
 import cv2
 import six
 from pathlib import Path
+from .networks.utils import loss_fn
+from tensorflow.keras import losses as KLosses
 import glob
 from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaCombineDataGen
 
@@ -38,17 +40,30 @@ class Prediction:
     def __init__(
         self,
         model_dir: Optional[str] = None,
-        weight_filename: Optional[str] = None,
+        weight_file: Optional[str] = None,
         model_type: str = None,
         **kwds
     ):
         try:
             self.channel_dim = 3
             bottleneck_layer_name = kwds.pop('bottleneck', None)
-            self.diqa = Diqa(model_type, bottleneck_layer_name)
             network = kwds.pop('network', 'subjective')
-
-            self.diqa.load_weights(model_dir, weight_filename, prefix=network)
+            self.diqa = Diqa(model_type, bottleneck_layer_name)
+            
+            cond_loss_fn = (
+                loss_fn
+                if self.network == 'objective'
+                else KLosses.MeanSquaredError(name=f'{self.network}_losses')
+            )
+            
+            self.diqa.compile(
+                optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
+                loss_fn=cond_loss_fn,
+                current_ops=self.network
+            )
+            model_path = Path(model_dir) / weight_file
+            self.diqa.load_weights(model_path, prefix=network)
+        
         except Exception as e:
             print("Unable to load DIQA model, check model path", str(e))
             sys.exit(1)
@@ -70,7 +85,7 @@ class Prediction:
 
         start = perf_counter()
         I_d = tf.tile(I_d, (1, 1, 1, self.channel_dim))
-        prediction = self.diqa.subjective.predict(I_d)[0][0]
+        prediction = self.diqa.predict(I_d)[0][0]
         end = perf_counter()
 
         logger.debug(f"Keras model took {end-start} seconds to predict the iqa score")

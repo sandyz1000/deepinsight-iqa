@@ -91,16 +91,16 @@ def average_reliability_map(distorted: tf.Tensor, alpha: float) -> tf.Tensor:
 
 
 @tf.function
-def loss_fn(model_, x, y_true, r):
-    y_pred = model_(x, True)
+def loss_fn(model_fn, x, y_true, r):
+    y_pred = model_fn(x)
     return tf.reduce_mean(tf.square((y_true - y_pred) * r))
 
 
 @tf.function
-def gradient(model, x, y_true, r):
+def gradient(model_fn, x, y_true, r):
     with tf.GradientTape() as tape:
-        loss_value = loss_fn(model, x, y_true, r)
-    return loss_value, tape.gradient(loss_value, model.trainable_variables)
+        loss_value = loss_fn(model_fn, x, y_true, r)
+    return loss_value, tape.gradient(loss_value, model_fn.trainable_variables)
 
 
 @tf.function

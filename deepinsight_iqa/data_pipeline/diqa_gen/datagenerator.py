@@ -20,7 +20,7 @@ def load_image(img_file, target_size=None):
     :param _type_ img_file: _description_
     :param _type_ target_size: `load_img` Can accept optional arguments None, 
     defaults to None
-    
+
     :return np.ndarray: N-d tensor
     """
     pilimg = tf.keras.preprocessing.image.load_img(img_file, target_size=target_size)
@@ -34,19 +34,20 @@ def read_image(filename: str, **kwargs) -> tf.Tensor:
 
 def _augmentation(img1, img2, rand_crop_dims=[416, 416], random_crop=False, geometric_augment=False):
     
-    augmenter = [image_aug.random_horizontal_flip, image_aug.random_vertical_flip]
-    
+    augmenter = [image_aug.horizontal_flip, image_aug.vertical_flip]
+
     if random_crop:
         random_func = partial(image_aug.random_crop, rand_crop_dims)
         augmenter.append(random_func)
-    
+
     if geometric_augment:
         geometric_func = partial(image_aug.augment_img, augmentation_name='geometric')
         augmenter.append(geometric_func)
-
-    aug_fn = random.choice(augmenter)
-    img1 = aug_fn(img1)
-    img2 = aug_fn(img2)
+    
+    random.seed(42)
+    fn_idx = random.randint(0, len(augmenter) - 1)
+    img1 = augmenter[fn_idx](img1)
+    img2 = augmenter[fn_idx](img2)
     return img1, img2
 
 
@@ -113,8 +114,8 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
     def __getitem__(self, index):
         batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]  # get batch indexes
         batch_samples = [self.samples[i] for i in batch_indexes]  # get batch samples
-        X_dist, X_ref, y = self.data_generator(batch_samples)
-        return X_dist, X_ref, y
+        X_dist, dist_gray, X_ref, Y = self.data_generator(batch_samples)
+        return X_dist, dist_gray, X_ref, Y
 
     def on_epoch_end(self):
         self.indexes = np.arange(len(self.samples))
@@ -129,9 +130,14 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
             i_d, i_r, label = self.data_parser(*sample)
             if i_d is None or i_r is None:
                 continue
+
             distorted_image, reference_image = (load_image(im) for im in [i_d, i_r])
-            if reference_image is None or distorted_image is None:
+            if (
+                (reference_image is None or distorted_image is None) or
+                (reference_image.shape != distorted_image.shape)
+            ):
                 continue
+
             if self.img_preprocessing:
                 distorted_image, reference_image = [
                     tf.squeeze(self.img_preprocessing(im), axis=0)
@@ -153,8 +159,12 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
             X_dist.append(distorted_image)
             X_ref.append(reference_image)
             mos.append(label)
+        
         X_dist, X_ref, mos = (tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, mos])
-        return X_dist, X_ref, mos
+        
+        X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
+        dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
+        return X_dist, dist_gray, X_ref, mos
 
     def __eval_datagen__(self, batch_samples):
         """ initialize images and labels tensors for faster processing """
@@ -178,7 +188,10 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
             mos.append(label)
 
         X_dist, X_ref, mos = (tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, mos])
-        return X_dist, X_ref, mos
+        
+        X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
+        dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
+        return X_dist, dist_gray, X_ref, mos
 
 
 class LiveDataRowParser(DiqaDataGenerator):
@@ -398,7 +411,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
             input_size ([type], optional): [description]. Defaults to (256, 256).
             channel_dim ([type], optional): [description]. Defaults to 3.
         """
-        
+
         self.do_train = do_train
         self.samples = samples
         self.image_dir = image_dir
@@ -431,31 +444,46 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         Y = []
 
         for row in batch_samples:
-            _, i_d, i_r, mos_score = row
-            i_d, i_r = [load_image(os.path.join(self.image_dir, im), target_size=self.input_size) for im in [i_d, i_r]]
+            _, dist_img, ref_img, mos_score = row
+            dist_img, ref_img = [
+                load_image(os.path.join(self.image_dir, im), target_size=self.input_size) 
+                for im in [dist_img, ref_img]
+            ]
+            
+            if ref_img is None or dist_img is None:
+                continue
 
             if self.img_preprocessing:
-                i_d, i_r = [tf.squeeze(self.img_preprocessing(im), axis=0) for im in [i_d, i_r]]
+                dist_img, ref_img = [tf.squeeze(self.img_preprocessing(im), axis=0) for im in [dist_img, ref_img]]
 
-            i_d, i_r = [
+            dist_img, ref_img = [
                 tf.tile(im, (1, 1, self.channel_dim))
                 if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
-                for im in [i_d, i_r]
+                for im in [dist_img, ref_img]
             ]
             if self.do_augment:
-                i_d, i_r = _augmentation(i_d, i_r, rand_crop_dims=self.img_crop_dims, random_crop=False)
+                dist_img, ref_img = _augmentation(dist_img, ref_img, rand_crop_dims=self.img_crop_dims, random_crop=False)
 
-            X_dist.append(i_d)
-            X_ref.append(i_r)
+            if ref_img.shape != dist_img.shape:
+                continue
+            
+            X_dist.append(dist_img)
+            X_ref.append(ref_img)
             Y.append(mos_score)
 
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
-        return X_dist, X_ref, Y
+        
+        X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
+        dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
+        return X_dist, dist_gray, X_ref, Y
 
     def __batch_generator(self, batch_samples):
         X = []
         for dist_im in batch_samples:
             dist_im = load_image(os.path.join(self.image_dir, dist_im), target_size=self.input_size)
+            if dist_im is None:
+                continue
+
             if self.img_preprocessing:
                 dist_im = tf.squeeze(self.img_preprocessing(dist_im), axis=0)
 
@@ -510,7 +538,7 @@ class get_train_datagenerator:
         if do_train:
             np.random.shuffle(samples)
         self.zipped = itertools.cycle(samples) if repeat else iter(samples)
-        
+
     def __iter__(self):
         return self
 
@@ -522,34 +550,42 @@ class get_train_datagenerator:
         for _ in range(self.batch_size):
             try:
                 row = next(self.zipped)
-                _, i_d, i_r, mos_score = row
-                i_d, i_r = [
+                _, dist_img, ref_img, mos_score = row
+                dist_img, ref_img = [
                     load_image(os.path.join(self.image_dir, im), target_size=self.input_size)
-                    for im in [i_d, i_r]
+                    for im in [dist_img, ref_img]
                 ]
+
+                if (
+                    not ref_img or not dist_img or
+                    ref_img.shape != dist_img.shape
+                ):
+                    continue
 
                 if self.img_preprocessing:
-                    i_d, i_r = [
+                    dist_img, ref_img = [
                         tf.squeeze(self.img_preprocessing(im), axis=0)
-                        for im in [i_d, i_r]
+                        for im in [dist_img, ref_img]
                     ]
 
-                i_d, i_r = [
+                dist_img, ref_img = [
                     tf.tile(im, (1, 1, self.channel_dim))
                     if self.channel_dim == 3 and im.get_shape()[-1] != 3 else im
-                    for im in [i_d, i_r]
+                    for im in [dist_img, ref_img]
                 ]
                 if self.do_augment:
-                    i_d, i_r = _augmentation(i_d, i_r, rand_crop_dims=self.img_crop_dims)
-                        
-                X_dist.append(i_d)
-                X_ref.append(i_r)
+                    dist_img, ref_img = _augmentation(dist_img, ref_img, rand_crop_dims=self.img_crop_dims)
+
+                X_dist.append(dist_img)
+                X_ref.append(ref_img)
                 Y.append(mos_score)
             except StopIteration:
                 break
 
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
-        return X_dist, X_ref, Y
+        X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
+        dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
+        return X_dist, dist_gray, X_ref, Y
 
 
 class get_batch_datagenerator:
@@ -591,18 +627,19 @@ class get_batch_datagenerator:
         X_dist = []
         for _ in range(self.batch_size):
             try:
-                i_d = next(self.zipped)
-                i_d = load_image(os.path.join(self.image_dir, i_d), target_size=self.input_size)
-
+                dist_img = next(self.zipped)
+                dist_img = load_image(os.path.join(self.image_dir, dist_img), target_size=self.input_size)
+                if dist_img is None:
+                    continue
+                
                 if self.img_preprocessing:
-                    i_d = tf.squeeze(self.img_preprocessing(i_d), axis=0)
+                    dist_img = tf.squeeze(self.img_preprocessing(dist_img), axis=0)
 
-                i_d = tf.tile(i_d, (1, 1, self.channel_dim)) \
-                    if self.channel_dim == 3 and i_d.get_shape()[-1] != 3 else i_d
+                dist_img = tf.tile(dist_img, (1, 1, self.channel_dim)) \
+                    if self.channel_dim == 3 and dist_img.get_shape()[-1] != 3 else dist_img
 
-                X_dist.append(i_d)
+                X_dist.append(dist_img)
             except StopIteration:
                 break
 
         return tf.cast(X_dist, dtype=tf.float32)
-

@@ -44,21 +44,20 @@ def random_crop(img: tf.Tensor, crop_dims: tf.Tensor) -> tf.Tensor:
     return img[y:(y + ch), x:(x + cw), :]
 
 
-def random_horizontal_flip(img: tf.Tensor) -> tf.Tensor:
+def horizontal_flip(img: tf.Tensor) -> tf.Tensor:
     assert len(img.shape) == 3, 'input tensor must have 3 dimensions (height, width, channels)'
-    if np.random.random() < 0.5:
-        img = tf.transpose(img, perm=[1, 0, 2])
-        img = img[::-1, ...]
-        img = tf.transpose(img, perm=[0, 1, 2])
+    img = tf.transpose(img, perm=[1, 0, 2])
+    img = img[::-1, ...]
+    img = tf.transpose(img, perm=[0, 1, 2])
     return img
 
 
-def random_vertical_flip(img: tf.Tensor) -> tf.Tensor:
+def vertical_flip(img: tf.Tensor) -> tf.Tensor:
     assert len(img.shape) == 3, 'input tensor must have 3 dimensions (height, width, channels)'
-    if np.random.random() < 0.5:
-        img = tf.transpose(img, perm=[0, 1, 2])
-        img = img[::-1, ...]
-        img = tf.transpose(img, perm=[0, 1, 2])
+    
+    img = tf.transpose(img, perm=[0, 1, 2])
+    img = img[::-1, ...]
+    img = tf.transpose(img, perm=[0, 1, 2])
     return img
 
 
