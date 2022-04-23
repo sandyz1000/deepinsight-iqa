@@ -133,6 +133,7 @@ def train(
             return 0
 
         trainer.train_final()
+        trainer.save_weights()
 
     def train_nima(cfg, image_dir, base_dir, input_file):
         samples_file = os.path.join(base_dir, input_file)

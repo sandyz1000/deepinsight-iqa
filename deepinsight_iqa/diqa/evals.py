@@ -54,8 +54,8 @@ class Evaluation:
         
         I_d = image_preprocess(distorted_image)
         I_r = image_preprocess(reference_image)
-        dist_prediction = self.diqa.subjective_model.predict(I_d)[0][0]
-        ref_prediction = self.diqa.subjective_model.predict(I_r)[0][0]
+        dist_prediction = self.diqa.subjective.predict(I_d)[0][0]
+        ref_prediction = self.diqa.subjective.predict(I_r)[0][0]
         return dist_prediction, ref_prediction
 
     def save_json(self, data, target_file):
@@ -79,7 +79,7 @@ class Evaluation:
         )
         
         nb_samples = len(datagen)
-        predictions = self.diqa.subjective_model.predict_generator(datagen)
+        predictions = self.diqa.subjective.predict_generator(datagen)
         df = pd.read_csv(csv_path)
         outputs = []
         for idx in range(nb_samples):

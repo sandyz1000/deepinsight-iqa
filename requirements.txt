@@ -8,5 +8,6 @@ scikit-learn
 scikit-image
 imgaug
 click
+random_name
 tensorflow_datasets
 tensorflow-probability

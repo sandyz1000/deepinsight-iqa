@@ -1,5 +1,5 @@
 {
-	"model_dir": "weights/diqa",
+	"model_dir": "weights/diqa/mobilenet",
 	"network": "subjective",
 	"log_dir": "logs/mobilenet", 
 	"bottleneck": "MobileNet",

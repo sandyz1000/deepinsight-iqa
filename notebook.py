@@ -24,9 +24,9 @@ job_dir = os.path.realpath(os.path.curdir)
 image_dir = "image_quality_data/data"
 csv_path = "combine.csv"
 # cfg_path = "configs/diqa/mobilenet.json"
-cfg_path = "configs/diqa/inceptionv3.json"
+# cfg_path = "configs/diqa/inceptionv3.json"
 # cfg_path = "configs/diqa/resnetv2.json"
-# cfg_path = "configs/diqa/default.json"
+cfg_path = "configs/diqa/default.json"
 # resolve_config_path = (lambda cfg_path: Path(os.path.dirname(__file__)) / cfg_path)
 # cfg = parse_config(resolve_config_path(cfg_path))
 cfg = parse_config(cfg_path)
@@ -35,10 +35,12 @@ train, valid = get_iqa_datagen(
     image_dir,
     os.path.join(image_dir, csv_path),
     do_augment=cfg['use_augmentation'],
-    image_preprocess=image_preprocess, 
+    image_preprocess=image_preprocess,
     input_size=cfg['input_size'],
+    batch_size=cfg['batch_size'],
+    channel_dim=1,
     do_train=True
-)   
+)
 # %%
 it = iter(train)
 X_dist, X_ref, Y = next(it)
@@ -47,8 +49,15 @@ plt.imshow(X_ref[0], cmap='gray')
 # %%
 network = cfg.pop('network', 'subjective')
 model_dir = cfg.pop('model_dir', 'weights/diqa')
+weight_file = cfg.pop('weight_file', 'objective-model-custom-1650708810.9949222.h5')
 # %%
-trainer = Trainer(train, valid, network=network, model_dir=model_dir, **cfg)
+trainer = Trainer(
+    train, valid,
+    network=network,
+    model_dir=model_dir,
+    weight_file=weight_file,
+    **cfg
+)
 
 
 # %%

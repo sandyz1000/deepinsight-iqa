@@ -3,9 +3,15 @@ import os
 import time
 from pathlib import Path
 import tensorflow as tf
-import tensorflow.keras.layers as KL
-import tensorflow.keras.applications as KA
-import tensorflow.keras.models as KM
+# import tensorflow.keras.layers as KL
+# import tensorflow.keras.applications as KA
+# import tensorflow.keras.models as KM
+# from tensorflow.keras import metrics as KMetric
+import keras.layers as KL
+import keras.applications as KA
+import keras.models as KM
+from keras import metrics as KMetric
+
 from abc import abstractmethod
 from .. import (
     CUSTOM_MODEL_TYPE,
@@ -13,11 +19,19 @@ from .. import (
     MODEL_FILE_NAME,
     CONFIG_FILE_NAME,
     SUBJECTIVE_NW,
-    OBJECTIVE_NW
+    OBJECTIVE_NW,
+    DTF_DATETIMET
 )
+from .utils import gradient, calculate_error_map, loss_fn, SpearmanCorrMetric
 
 
-class BaseModel(tf.keras.Model):
+def generate_random_name(batch_size, epochs):
+    import random_name
+    model_filename = f"diqa-{random_name.generate_name()}-{batch_size}-{epochs}.h5"
+    return model_filename
+
+
+class BaseModel(KM.Model):
     @abstractmethod
     def save_pretrained(self, saved_path: str, prefix):
         """_summary_
@@ -35,11 +49,10 @@ class BaseModel(tf.keras.Model):
         """
 
 
-class CustomModel(KM.Model):
+class CustomModel(tf.Module):
     def __init__(self, **kwds):
         super(CustomModel, self).__init__()
         self.kwds = kwds
-
         self.conv1 = KL.Conv2D(48, (3, 3), name='Conv1', activation='relu', padding='same')
         self.conv2 = KL.Conv2D(48, (3, 3), name='Conv2', activation='relu', padding='same', strides=(2, 2))
         self.conv3 = KL.Conv2D(64, (3, 3), name='Conv3', activation='relu', padding='same')
@@ -49,7 +62,8 @@ class CustomModel(KM.Model):
         self.conv7 = KL.Conv2D(128, (3, 3), name='Conv7', activation='relu', padding='same')
         self.conv8 = KL.Conv2D(128, (3, 3), name='bottleneck', activation='relu', padding='same', strides=(2, 2))
 
-    def call(self, inputs: tf.Tensor):
+    @tf.function
+    def __call__(self, inputs: tf.Tensor):
         out = self.conv1(inputs)
         out = self.conv2(out)
         out = self.conv3(out)
@@ -104,61 +118,133 @@ class Diqa(BaseModel):
         self,
         model_type: str,
         bn_layer: str,
-        optimizer=None,
         train_bottleneck=False,
+        objective_fn: KM.Model = None,
+        subjective_fn: KM.Model = None,
+        is_training: bool = False,
         kwds={}
     ) -> None:
         super(Diqa, self).__init__()
-        self.optimizer = optimizer
         bottleneck = get_bottleneck(
             model_type=model_type,
             bottleneck=bn_layer,
             train_bottleneck=train_bottleneck,
             kwds=kwds
         )
+
+        self.model_type = model_type
         self.custom = True if model_type == CUSTOM_MODEL_TYPE else False
         # Initialize objective and subjective model for training/inference
 
-        self.__objective_net = ObjectiveModel(bottleneck, custom=self.custom)
-        self.__subjective_net = SubjectiveModel(bottleneck)
-
-    @property
-    def objective_model(self):
-        return self.__objective_net
-
-    @property
-    def subjective_model(self):
-        return self.__subjective_net
-
-    def call(
-        self,
-        input_tensor: tf.Tensor,
-        objective_output: bool = False
-    ):
-        """Call the model 
+        if objective_fn is None:
+            self.objective = ObjectiveModel(bottleneck, custom=self.custom)
+        else:
+            self.objective = objective_fn
+        if subjective_fn is None:
+            self.subjective = SubjectiveModel(bottleneck)
+        else:
+            self.subjective = subjective_fn
+        
+        self.loss_metric = KMetric.Mean(name=f'loss', dtype=tf.float32)
+        self.acc1_metric = KMetric.MeanSquaredError(name=f'accuracy', dtype=tf.float32)
+        self.acc2_metric = SpearmanCorrMetric(name=f'accuracy', dtype=tf.float32)
+        self._metrics = [self.loss_metric, self.acc1_metric, self.acc2_metric]
+    
+    def call(self, inputs: tf.Tensor):
+        """Call the model
 
         :param tf.Tensor input_tensor: _description_
-        :param bool objective_output: _description_, defaults to False
+        :param bool is_objective: _description_, defaults to False
         """
-        return self.__objective_net(input_tensor) if objective_output \
-            else self.__subjective_net(input_tensor)
+        if self.__out_state == OBJECTIVE_NW:
+            return self.objective(inputs)
 
-    def __get_model_fname(self, saved_path, prefix):
-        now = time.time()
+        return self.subjective(inputs)
+
+    @property
+    def metrics(self):
+        return self._metrics
+
+    def compile(self, optimizer, loss_fn, metrics=[], out_state=None):
+        """State output is set to subjective by default, re-compile if you want
+        the model to return objective output
+
+        :param _type_ optimizer: _description_
+        :param _type_ loss_fn: _description_
+        :param _type_ metrics: _description_, defaults to []
+        :param _type_ out_state: _description_, defaults to None
+        """
+        super(Diqa, self).compile()
+        self.metrics = metrics
+        self.optimizer = optimizer
+        self.loss_fn = loss_fn
+        self.__out_state = out_state
+
+    def train_step(self, data):
+        distorted, reference, mos = data
+        
+        if self.__out_state == OBJECTIVE_NW:
+            reference = tf.slice(reference, begin=[0, 0, 0, 0], size=(reference.shape[:-1] + [1]))
+            distorted_gray = tf.slice(distorted, begin=[0, 0, 0, 0], size=(distorted.shape[:-1] + [1]))
+            e_gt, r = calculate_error_map(distorted_gray, reference, scaling_factor=self.scaling_factor)
+            if self.is_training:
+                loss_value, gradients = gradient(self.objective, distorted, e_gt, r)
+                self.optimizer.apply_gradients(zip(gradients, self.model.trainable_weights))
+            else:
+                loss_value = self.loss_fn(self.model, distorted, e_gt, r)
+
+            err_pred = self.objective(distorted)
+            _shape = tf.TensorShape([e_gt.shape[0], tf.reduce_prod(e_gt.shape[1:]).numpy()])
+
+            err_pred = tf.reshape(err_pred, shape=_shape)
+            e_gt = tf.reshape(e_gt, shape=_shape)
+            
+            self.loss_metric.update_state(loss_value)
+            self.acc1_metric.update_state(e_gt, err_pred)
+
+            # return loss, acc
+            return {
+                "accuracy": self.acc1_metric.result(),
+                "loss": self.loss_metric.result(),
+            }
+        else:
+            if self.is_training:
+                # Train here subjective loss
+                with tf.GradientTape() as tape:
+                    preds = self.subjective(distorted)
+                    g_loss = self.loss_fn(preds, mos)
+                grads = tape.gradient(g_loss, self.subjective.trainable_weights)
+                self.optimizer.apply_gradients(zip(grads, self.generator.trainable_weights))
+            else:
+                g_loss = self.loss_fn(preds, mos)
+
+            self.loss_metric.update_state(g_loss)
+            self.acc1_metric.update_state(mos, preds)
+
+            # return loss, acc
+            return {
+                "accuracy": self.acc1_metric.result(),
+                "loss": self.loss_metric.result(),
+            }
+
+    @classmethod
+    def __get_model_fname(cls, saved_path, prefix, model_type):
+        now = time.strftime(DTF_DATETIMET)
         filename, ext = os.path.splitext(MODEL_FILE_NAME)
-        model_path = os.path.join(saved_path, f"{prefix}-{filename}-{now}{ext}")
+        model_path = os.path.join(saved_path, f"{prefix}-{filename}-{model_type}-{now}{ext}")
         return model_path
 
-    def save_pretrained(self, saved_path, prefix=None):
+    @classmethod
+    def save_pretrained(cls, saved_path, prefix=None, model_type=None, model_path=None):
         """Save config and weights to file"""
 
         os.makedirs(saved_path, exist_ok=True)
-        model_path = self.__get_model_fname(saved_path, prefix)
-
+        model_path = model_path or cls.__get_model_fname(saved_path, prefix)
+        model = cls.build()
         if prefix == OBJECTIVE_NW:
-            self.__objective_net.save_weights(model_path)
+            model.objective_net.save_weights(model_path)
         else:
-            self.__subjective_net.save_weights(model_path)
+            model.subjective_net.save_weights(model_path)
 
     def load_weights(self, model_dir: Path, model_path: Path, prefix):
 
@@ -169,9 +255,9 @@ class Diqa(BaseModel):
                 FileNotFoundError(f"Model path {model_path} not found")
 
         if prefix == OBJECTIVE_NW:
-            self.__objective_net.load_weights(model_path)
+            self.objective.load_weights(model_path)
         else:
-            self.__subjective_net.load_weights(model_path)
+            self.subjective.load_weights(model_path)
 
 
 class ObjectiveModel(KM.Model):

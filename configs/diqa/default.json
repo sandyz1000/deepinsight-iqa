@@ -7,7 +7,7 @@
 	"existing_weights": null,
 	"use_augmentation": true,
 	"batch_size": 1,
-	"use_pretrained": false,
+	"use_pretrained": true,
 	"channel_dim": 3,
 	"train_bottleneck": true,
 	"epochs": 10,
@@ -22,5 +22,5 @@
 	"num_workers_data_load": 2,
 	"custom": false,
 	"input_size": null,
-	"scaling_factor": 0.25
+	"scaling_factor": 0.0625
 }

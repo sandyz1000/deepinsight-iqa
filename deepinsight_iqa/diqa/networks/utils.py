@@ -103,13 +103,6 @@ def gradient(model, x, y_true, r):
     return loss_value, tape.gradient(loss_value, model.trainable_variables)
 
 
-# def calculate_error_map(features, SCALING_FACTOR=1 / 32):
-#     I_d = image_preprocess(features['distorted_image'])
-#     I_r = image_preprocess(features['reference_image'])
-#     r = rescale(average_reliability_map(I_d, 0.2), SCALING_FACTOR)
-#     e_gt = rescale(error_map(I_r, I_d, 0.2), SCALING_FACTOR)
-#     return (I_d, e_gt, r)
-
 @tf.function
 def calculate_error_map(
     I_d: tf.Tensor,
@@ -121,29 +114,69 @@ def calculate_error_map(
     return e_gt, r
 
 
-class SpearmanCorrMetric(KMetric.Metric):
+class PearsonCorrMetric(KMetric.Metric):
     def __init__(self, name='spearman-corr', dtype=None, **kwargs):
-        super(SpearmanCorrMetric, self).__init__(name, dtype, **kwargs)
-        self.corr_score = self.add_weight(name='corr-score', initializer='zeros')
+        super(PearsonCorrMetric, self).__init__(name, dtype, **kwargs)
+        self.corr_score = self.add_weight(name='score', initializer='zeros')
 
-    def update_state_spearman(self, y_true: tf.Tensor, y_pred: tf.Tensor):
-        _spearmanr = partial(spearmanr, axis=None)
-        value = tf.py_function(
-            _spearmanr,
-            inp=[tf.cast(y_pred, tf.float32), tf.cast(y_true, tf.float32)],
-            Tout=tf.float32
-        )
-        # rho = value.rho
-        self.corr_score.assign_add(value)
-    
-    def update_state_pearson(self, y_true: tf.Tensor, y_pred: tf.Tensor):
-        return tfp.stats.correlation(y_true, y_pred, sample_axis=None, event_axis=None)
-
-    def update_state(self, y_true, y_pred):
-        return self.update_state_pearson(y_true, y_pred)
+    def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor):
+        corr = tfp.stats.correlation(y_true, y_pred, sample_axis=None, event_axis=None)
+        self.corr_score.assign_add(corr)
 
     def result(self):
         return self.corr_score
 
 
+class SpearmanCorrMetric(KMetric.Metric):
+    def __init__(self, name='spearman-corr', dtype=None, **kwargs):
+        super(SpearmanCorrMetric, self).__init__(name, dtype, **kwargs)
+        self.corr_score = self.add_weight(name='corr-score', initializer='zeros')
 
+    def get_rank(self, y_pred):
+        rank = tf.argsort(tf.argsort(y_pred, axis=-1, direction="ASCENDING"), axis=-1) + \
+            1  # +1 to get the rank starting in 1 instead of 0
+        return rank
+
+    def sp_rank(self, x, y):
+        cov = tfp.stats.covariance(x, y, sample_axis=0, event_axis=None)
+        sd_x = tfp.stats.stddev(x, sample_axis=0, keepdims=False, name=None)
+        sd_y = tfp.stats.stddev(y, sample_axis=0, keepdims=False, name=None)
+        return 1 - cov / (sd_x * sd_y)  # 1- because we want to minimize loss
+
+    def spearman_correlation(self, y_true, y_pred):
+        """
+        First we obtain the ranking of the predicted values
+
+        Example:
+        --------
+        Spearman rank correlation between each pair of samples:
+        Sample dim: (1, 8)
+        Batch of samples dim: (None, 8) None=batch_size=64
+        Output dim: (batch_size, ) = (64, )
+
+        :param _type_ y_true: _description_
+        :param _type_ y_pred: _description_
+        :return _type_: _description_
+        """
+
+        y_pred_rank = tf.map_fn(lambda x: self.get_rank(x), y_pred, dtype=tf.float32)
+
+        sp = tf.map_fn(lambda x: self.sp_rank(x[0], x[1]), (y_true, y_pred_rank), dtype=tf.float32)
+        # Reduce to a single value
+        loss = tf.reduce_mean(sp)
+        return loss
+
+    def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor):
+        corr = self.spearman_correlation(self, y_true, y_pred)
+
+        # _spearmanr = partial(spearmanr, axis=None)
+        # corr = tf.py_function(
+        #     _spearmanr,
+        #     inp=[tf.cast(y_pred, tf.float32), tf.cast(y_true, tf.float32)],
+        #     Tout=tf.float32
+        # )
+
+        self.corr_score.assign_add(corr)
+
+    def result(self):
+        return self.corr_score

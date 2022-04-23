@@ -11,7 +11,6 @@ from tensorflow.keras import losses as KLosses
 from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 import tensorflow.keras.backend as K
 from .networks.model import Diqa, BaseModel
-from .networks.utils import gradient, calculate_error_map, loss_fn, SpearmanCorrMetric
 from deepinsight_iqa.common.utility import get_stream_handler
 from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaDataGenerator
 
@@ -33,49 +32,38 @@ def return_strategy():
         return tf.distribute.MirroredStrategy()
 
 
-class ModelType(enum.Enum):
-    objective = "objective"
-    subjective = "subjective"
+# class TrainerStep:
+#     def __init__(self, model, name, is_training: bool = False, **kwds) -> None:
+#         self.model = model  # type: BaseModel
+#         self.loss = KMetric.Mean(name=f'{name}_loss', dtype=tf.float32)
+#         self.accuracy = KMetric.MeanSquaredError(name=f'{name}_accuracy')
+#         # self.accuracy = SpearmanCorrMetric(name=f'{name}_accuracy')
+#         self.is_training = is_training
+#         self.scaling_factor = kwds['scaling_factor']
 
+#     def __call__(self, distorted, reference):
+#         # reference = tf.slice(reference, begin=[0, 0, 0, 0], size=(reference.shape[:-1] + [1]))
+#         # distorted_gray = tf.slice(distorted, begin=[0, 0, 0, 0], size=(distorted.shape[:-1] + [1]))
+#         # e_gt, r = calculate_error_map(distorted_gray, reference, scaling_factor=self.scaling_factor)
+#         # if self.is_training:
+#         #     loss_value, gradients = gradient(self.model, distorted, e_gt, r)
+#         #     self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_weights))
+#         # else:
+#         #     loss_value = loss_fn(self.model, distorted, e_gt, r)
 
-def generate_random_name(batch_size, epochs):
-    import random_name
-    model_filename = f"diqa-{random_name.generate_name()}-{batch_size}-{epochs}.h5"
-    return model_filename
+#         # loss = self.loss(loss_value)
+#         # err_pred = self.model(distorted, is_objective=True)
+#         # _shape = tf.TensorShape([e_gt.shape[0], tf.reduce_prod(e_gt.shape[1:]).numpy()])
 
+#         # err_pred = tf.reshape(err_pred, shape=_shape)
+#         # e_gt = tf.reshape(e_gt, shape=_shape)
+#         # acc = self.accuracy(e_gt, err_pred)
 
-class TrainerStep:
-    def __init__(self, model, name, is_training: bool = False, **kwds) -> None:
-        self.model = model  # type: BaseModel
-        self.loss = KMetric.Mean(name=f'{name}_loss', dtype=tf.float32)
-        self.accuracy = KMetric.MeanSquaredError(name=f'{name}_accuracy')
-        # self.accuracy = SpearmanCorrMetric(name=f'{name}_accuracy')
-        self.is_training = is_training
-        self.scaling_factor = kwds['scaling_factor']
+#         # return loss, acc
 
-    def __call__(self, distorted, reference):
-        reference = tf.slice(reference, begin=[0, 0, 0, 0], size=(reference.shape[:-1] + [1]))
-        distorted_gray = tf.slice(distorted, begin=[0, 0, 0, 0], size=(distorted.shape[:-1] + [1]))
-        e_gt, r = calculate_error_map(distorted_gray, reference, scaling_factor=self.scaling_factor)
-        if self.is_training:
-            loss_value, gradients = gradient(self.model, distorted, e_gt, r)
-            self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_weights))
-        else:
-            loss_value = loss_fn(self.model, distorted, e_gt, r)
-
-        loss = self.loss(loss_value)
-        err_pred = self.model(distorted, objective_output=True)
-        _shape = tf.TensorShape([e_gt.shape[0], tf.reduce_prod(e_gt.shape[1:]).numpy()])
-
-        err_pred = tf.reshape(err_pred, shape=_shape)
-        e_gt = tf.reshape(e_gt, shape=_shape)
-        acc = self.accuracy(e_gt, err_pred)
-
-        return loss, acc
-
-    def reset_states(self):
-        self.loss.reset_states()
-        self.accuracy.reset_states()
+#     def reset_states(self):
+#         self.loss.reset_states()
+#         self.accuracy.reset_states()
 
 
 class Trainer:
@@ -143,6 +131,12 @@ class Trainer:
 
         self.__state_name = None
 
+    def train(self):
+        pass
+
+    def slow_trainer(self):
+        pass
+
     def train_objective(self):
 
         train_step = TrainerStep(
@@ -159,7 +153,7 @@ class Trainer:
         )
 
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
-        tbc.set_model(self.diqa.objective_model)
+        tbc.set_model(self.diqa.objective)
 
         # ## ## ## ## ## ## ## ## ## ##
         # BEGIN EPOCH
@@ -168,9 +162,13 @@ class Trainer:
         for epoch in tqdm.tqdm(range(self.epochs), bar_format='{desc:<5.5}{percentage:3.0f}%|{bar:20}{r_bar}'):
             min_step_count = min(self.train_datagen.steps_per_epoch,
                                  self.valid_datagen.steps_per_epoch)
-            for batch_idx in range(min_step_count):
+            batch_idx = 0
+            while batch_idx < min_step_count:
 
                 I_d, I_r, mos = self.train_datagen[batch_idx]
+                if I_d.shape != I_r.shape:
+                    continue
+                
                 loss, accuracy = train_step(I_d, I_r)
 
                 if self.valid_datagen:
@@ -183,6 +181,7 @@ class Trainer:
                     'val_loss': val_loss,
                     'val_accuracy': val_accuracy
                 })
+                batch_idx += 1
 
             tbc.on_epoch_end(epoch=epoch, logs={
                 'loss': train_step.loss.result(),
@@ -244,13 +243,13 @@ class Trainer:
             train_datagen = ((im, mos) for im, _, mos in train_datagen)
             valid_datagen = ((im, mos) for im, _, mos in valid_datagen)
 
-        self.diqa.subjective_model.compile(
+        self.diqa.compile(
             optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
             loss=KLosses.MeanSquaredError(name=f'{name}_losses'),
             metrics=[KMetric.MeanSquaredError(name=f'{name}_accuracy')]
         )
 
-        self.diqa.subjective_model.fit(
+        self.diqa.subjective.fit(
             train_datagen,
             validation_data=valid_datagen,
             steps_per_epoch=self.train_datagen.steps_per_epoch,

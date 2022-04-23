@@ -70,7 +70,7 @@ class Prediction:
 
         start = perf_counter()
         I_d = tf.tile(I_d, (1, 1, 1, self.channel_dim))
-        prediction = self.diqa.subjective_model.predict(I_d)[0][0]
+        prediction = self.diqa.subjective.predict(I_d)[0][0]
         end = perf_counter()
 
         logger.debug(f"Keras model took {end-start} seconds to predict the iqa score")
@@ -88,7 +88,7 @@ class Prediction:
             img_preprocessing=image_preprocess
         )
 
-        predictions = self.diqa.subjective_model.predict_generator(
+        predictions = self.diqa.subjective.predict_generator(
             X_data,
             workers=1,
             use_multiprocessing=False,

@@ -10,7 +10,7 @@
 	"batch_size": 8,
 	"use_pretrained": false,
 	"channel_dim": 3,
-	"train_bottleneck": false,
+	"train_bottleneck": true,
 	"epochs": 10,
 	"extra_epochs": 10,
 	"steps_per_epoch": 100,

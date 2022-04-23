@@ -45,7 +45,8 @@ def _augmentation(img1, img2, rand_crop_dims=[416, 416], random_crop=False, geom
         augmenter.append(geometric_func)
 
     aug_fn = random.choice(augmenter)
-    img1, img2 = aug_fn(img1), aug_fn(img2)
+    img1 = aug_fn(img1)
+    img2 = aug_fn(img2)
     return img1, img2
 
 
