@@ -69,6 +69,7 @@ class Trainer:
         """
         self.bottleneck_layer = kwargs.pop('bottleneck', None)
         self.model_type = kwargs.pop('model_type', None)
+        self.network = kwargs.get('network', 'subjective')
         self.epochs = epochs
         self.model_dir = model_dir
         self.log_dir = Path(log_dir)
@@ -92,12 +93,11 @@ class Trainer:
             self.valid_datagen.steps_per_epoch = min(kwargs['validation_steps'],
                                                      self.valid_datagen.steps_per_epoch)
 
-        self.network = kwargs.get('network', 'subjective')
-
     def train(self, diqa: Diqa):
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
+        model_path = diqa._get_model_fname(self.model_dir, self.network, self.model_type)
         model_checkpointer = ModelCheckpoint(
-            filepath=self.model_dir,
+            filepath=model_path,
             monitor='val_loss',
             verbose=1,
             save_best_only=True,
@@ -134,7 +134,7 @@ class Trainer:
             loss_fn=cond_loss_fn,
             current_ops=self.network
         )
-        # diqa.build()
+
         return diqa
     
     def load_weights(self, diqa: KM.Model, model_path: str):
@@ -201,10 +201,8 @@ class Trainer:
     def reset_state(self, diqa: Diqa):
         # Reset metrics every epoch
         diqa.ms_metric.reset_states()
-        if self.network:
-            diqa.loss_metric.reset_states()
-        else:
-            diqa.s_loss_metric.reset_states()
+        diqa.loss_metric.reset_states()
+        diqa.corr_metric.reset_states()
 
     def save_weights(self, diqa: Diqa):
         diqa.save_pretrained(self.model_dir, prefix=self.network)

@@ -159,9 +159,10 @@ class SpearmanCorrMetric(KMetric.Metric):
         :param _type_ y_pred: _description_
         :return _type_: _description_
         """
-        in_shape = [y_true.get_shape()[0], np.multiply.reduce(y_true.get_shape()[1:])]
-        y_pred = tf.reshape(y_pred, shape=in_shape)
-        y_true = tf.reshape(y_true, shape=in_shape)
+        # TODO: FixMe
+        to_shape = [y_true.get_shape()[0], np.multiply.reduce(y_true.get_shape()[1:])]
+        y_pred = tf.reshape(y_pred, shape=to_shape)
+        y_true = tf.reshape(y_true, shape=to_shape)
 
         y_pred_rank = tf.map_fn(lambda x: self.get_rank(x), y_pred, dtype=tf.float32)
 

@@ -238,7 +238,7 @@ class Diqa(KM.Model):
             "loss": self.loss_metric.result(),
         }
 
-    def __get_model_fname(self, saved_path, prefix, model_type):
+    def _get_model_fname(self, saved_path, prefix, model_type):
         now = time.strftime(DTF_DATETIMET)
         model_path = os.path.join(saved_path, f"{prefix}-{model_type}-{now}")
         return model_path
@@ -247,7 +247,7 @@ class Diqa(KM.Model):
         """Save config and weights to file"""
 
         os.makedirs(saved_path, exist_ok=True)
-        model_path = model_path or self.__get_model_fname(saved_path, prefix, self.model_type)
+        model_path = model_path or self._get_model_fname(saved_path, prefix, self.model_type)
         self.save(model_path, save_format='tf')
 
 
