@@ -17,7 +17,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 # from keras.callbacks import ModelCheckpoint, TensorBoard
 
 from . import OBJECTIVE_NW, SUBJECTIVE_NW
-from .networks.model import Diqa
+from .networks.model import ObjectiveModel, get_bottleneck, SubjectiveModel
 from .networks.utils import loss_fn
 from deepinsight_iqa.common.utility import get_stream_handler
 from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaDataGenerator
@@ -85,6 +85,12 @@ class Trainer:
         self.train_datagen = train_datagen  # type: DiqaDataGenerator
         self.valid_datagen = valid_datagen  # type: DiqaDataGenerator
 
+        self.bottleneck = get_bottleneck(
+            self.model_type,
+            self.bottleneck_layer,
+            train_bottleneck=kwargs['train_bottleneck']
+        )
+
         if 'steps_per_epoch' in kwargs:
             self.train_datagen.steps_per_epoch = min(kwargs['steps_per_epoch'],
                                                      self.train_datagen.steps_per_epoch)
@@ -93,7 +99,7 @@ class Trainer:
             self.valid_datagen.steps_per_epoch = min(kwargs['validation_steps'],
                                                      self.valid_datagen.steps_per_epoch)
 
-    def train(self, diqa: Diqa):
+    def train(self, diqa):
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
         model_path = diqa._get_model_fname(self.model_dir, self.network, self.model_type)
         model_checkpointer = ModelCheckpoint(
@@ -116,23 +122,19 @@ class Trainer:
             callbacks=[model_checkpointer, tbc]
         )
 
-    def compile(self, train_bottleneck=False):
-        diqa = Diqa(
-            self.model_type,
-            self.bottleneck_layer,
-            train_bottleneck=train_bottleneck,
-            kwds={"scaling_factor": self.kwargs['scaling_factor']}
-        )
+    def compile(self, custom=False, kwds={}):
         cond_loss_fn = (
             loss_fn
-            if self.network == 'objective'
+            if self.network == OBJECTIVE_NW
             else KLosses.MeanSquaredError(name=f'{self.network}_losses')
         )
-        
+        if self.network == OBJECTIVE_NW:
+            diqa = ObjectiveModel(self.bottleneck, custom=custom, kwds=kwds)
+        else:
+            diqa = SubjectiveModel(self.bottleneck)
         diqa.compile(
             optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
-            loss_fn=cond_loss_fn,
-            current_ops=self.network
+            loss_fn=cond_loss_fn
         )
 
         return diqa
@@ -146,7 +148,7 @@ class Trainer:
         else:
             print(f"Model path {model_path} not found, training from start!!")
         
-    def slow_trainer(self, diqa: Diqa):
+    def slow_trainer(self, diqa):
 
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
         tbc.set_model(diqa)
