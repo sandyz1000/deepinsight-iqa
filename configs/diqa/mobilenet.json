@@ -23,7 +23,6 @@
 	"dropout_rate": 0.75,
 	"multiprocessing_data_load": true,
 	"num_workers_data_load": 2,
-	"custom": false,
 	"input_size": [416, 416],
 	"scaling_factor": 0.03125
 }

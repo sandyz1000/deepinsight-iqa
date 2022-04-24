@@ -1,5 +1,6 @@
 import tensorflow as tf
 from scipy.stats import spearmanr
+import numpy as np
 from tensorflow.keras import metrics as KMetric
 from ..utils.tf_imgutils import rescale
 from functools import partial
@@ -158,6 +159,9 @@ class SpearmanCorrMetric(KMetric.Metric):
         :param _type_ y_pred: _description_
         :return _type_: _description_
         """
+        in_shape = [y_true.get_shape()[0], np.multiply.reduce(y_true.get_shape()[1:])]
+        y_pred = tf.reshape(y_pred, shape=in_shape)
+        y_true = tf.reshape(y_true, shape=in_shape)
 
         y_pred_rank = tf.map_fn(lambda x: self.get_rank(x), y_pred, dtype=tf.float32)
 
@@ -167,6 +171,7 @@ class SpearmanCorrMetric(KMetric.Metric):
         return loss
 
     def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor):
+        
         corr = self.spearman_correlation(self, y_true, y_pred)
 
         # _spearmanr = partial(spearmanr, axis=None)

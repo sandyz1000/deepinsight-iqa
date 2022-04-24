@@ -95,7 +95,6 @@ class Trainer:
         self.network = kwargs.get('network', 'subjective')
 
     def train(self, diqa: Diqa):
-        raise NotImplementedError
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
         model_checkpointer = ModelCheckpoint(
             filepath=self.model_dir,
@@ -105,30 +104,13 @@ class Trainer:
             save_weights_only=True
         )
 
-        train_datagen = self.train_datagen
-        valid_datagen = self.valid_datagen
-        
-        if self.network == SUBJECTIVE_NW:
-            if isinstance(self.train_datagen, tf.data.Dataset):
-                train_datagen = train_datagen.map(
-                    lambda im, _, mos: (im, mos),
-                    num_parallel_calls=tf.data.experimental.AUTOTUNE
-                )
-                valid_datagen = valid_datagen.map(
-                    lambda im, _, mos: (im, mos),
-                    num_parallel_calls=tf.data.experimental.AUTOTUNE
-                )
-            else:
-                train_datagen = ((im, mos) for im, _, mos in train_datagen)
-                valid_datagen = ((im, mos) for im, _, mos in valid_datagen)
-
-        diqa.fit_generator(
-            train_datagen,
-            validation_data=valid_datagen,
+        diqa.fit(
+            self.train_datagen,
+            validation_data=self.valid_datagen,
             steps_per_epoch=self.train_datagen.steps_per_epoch,
             validation_steps=self.valid_datagen.steps_per_epoch,
-            epochs=self.epochs + self.extra_epochs,
-            initial_epoch=self.epochs,
+            epochs=self.epochs,
+            # initial_epoch=self.epochs,
             use_multiprocessing=self.use_multiprocessing,
             workers=self.num_workers,
             callbacks=[model_checkpointer, tbc]
@@ -218,9 +200,9 @@ class Trainer:
 
     def reset_state(self, diqa: Diqa):
         # Reset metrics every epoch
-        diqa.acc1_metric.reset_states()
+        diqa.ms_metric.reset_states()
         if self.network:
-            diqa.o_loss_metric.reset_states()
+            diqa.loss_metric.reset_states()
         else:
             diqa.s_loss_metric.reset_states()
 

@@ -128,6 +128,7 @@ def train(
             **cfg
         )
         diqa = trainer.compile(train_bottleneck=cfg['train_bottleneck'])
+        diqa.build()
         if trainer.use_pretrained:
             trainer.load_weights(diqa)
         

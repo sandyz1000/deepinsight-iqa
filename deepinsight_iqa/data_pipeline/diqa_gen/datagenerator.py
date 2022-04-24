@@ -114,8 +114,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
     def __getitem__(self, index):
         batch_indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]  # get batch indexes
         batch_samples = [self.samples[i] for i in batch_indexes]  # get batch samples
-        X_dist, dist_gray, X_ref, Y = self.data_generator(batch_samples)
-        return X_dist, dist_gray, X_ref, Y
+        return self.data_generator(batch_samples)
 
     def on_epoch_end(self):
         self.indexes = np.arange(len(self.samples))
@@ -164,7 +163,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         
         X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
         dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
-        return X_dist, dist_gray, X_ref, mos
+        return [X_dist, dist_gray, X_ref], mos
 
     def __eval_datagen__(self, batch_samples):
         """ initialize images and labels tensors for faster processing """
@@ -191,7 +190,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         
         X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
         dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
-        return X_dist, dist_gray, X_ref, mos
+        return [X_dist, dist_gray, X_ref], mos
 
 
 class LiveDataRowParser(DiqaDataGenerator):
@@ -441,7 +440,7 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
     def __train_generator(self, batch_samples):
         X_dist = []
         X_ref = []
-        Y = []
+        mos = []
 
         for row in batch_samples:
             _, dist_img, ref_img, mos_score = row
@@ -469,13 +468,13 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
             
             X_dist.append(dist_img)
             X_ref.append(ref_img)
-            Y.append(mos_score)
+            mos.append(mos_score)
 
-        X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
+        X_dist, X_ref, mos = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, mos]]
         
         X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
         dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
-        return X_dist, dist_gray, X_ref, Y
+        return [X_dist, dist_gray, X_ref], mos
 
     def __batch_generator(self, batch_samples):
         X = []
@@ -585,7 +584,7 @@ class get_train_datagenerator:
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
         X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
         dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
-        return X_dist, dist_gray, X_ref, Y
+        return [X_dist, dist_gray, X_ref], Y
 
 
 class get_batch_datagenerator:

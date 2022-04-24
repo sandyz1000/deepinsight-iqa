@@ -49,7 +49,8 @@ X_dist, dist_gray, X_ref, Y = next(it)
 plt.imshow(X_ref[0], cmap='gray')
 # %%
 network = 'objective'
-cfg.pop('network')
+if 'network' in cfg:
+    cfg.pop('network')
 model_dir = cfg.pop('model_dir', 'weights/diqa')
 
 # %%
@@ -61,19 +62,19 @@ trainer = Trainer(
     **cfg
 )
 diqa = trainer.compile(train_bottleneck=True)
+diqa.build()
 # %%
-# weight_file = cfg.pop('weight_file', 'objective-model-custom-1650708810.9949222.h5')
-# model_path = Path(model_dir) / weight_file
-# diqa.build(input_shape=(None, None, 1))
-# trainer.load_weights(diqa, model_path)
+weight_file = cfg.pop('weight_file', 'weights/diqa/objective-diqa-diqa_custom-2022-04-23T23:29:26')
+model_path = Path(model_dir) / weight_file
+trainer.load_weights(diqa, model_path)
 
 # %%
-# trainer.train(diqa)
+# trainer.slow_trainer(diqa)
+trainer.epochs = 9
+trainer.train(diqa)
 # %%
-trainer.slow_trainer(diqa)
-# %%
-# trainer.save_weights(diqa)
-diqa.save("temp-1", save_format='tf')
+trainer.save_weights(diqa)
+# diqa.save("temp-1", save_format='tf')
 # %%
 image_dir, csv_path = "/Volumes/SDM/Dataset/iqa", "technical/combine.csv"
 config_file = os.path.realpath(os.path.join(job_dir, "confs/diqa_inceptionv3.json"))

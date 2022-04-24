@@ -1,13 +1,13 @@
-import typing as tp
 import os
 import time
-from pathlib import Path
 import tensorflow as tf
 
 import tensorflow.keras.layers as KL
 import tensorflow.keras.applications as KA
 import tensorflow.keras.models as KM
+from tensorflow.keras import losses as KLosses
 from tensorflow.keras import metrics as KMetric
+
 # import keras.layers as KL
 # import keras.applications as KA
 # import keras.models as KM
@@ -142,11 +142,11 @@ class Diqa(KM.Model):
 
         self.loss_fn = None
         self.optimizer = None
+        self._input_shape = bottleneck.input_shape
 
-        self.s_loss_metric = KMetric.MeanSquaredError(name=f'subjective_losses')
-        self.o_loss_metric = KMetric.Mean(name=f'objective_loss', dtype=tf.float32)
-        self.acc1_metric = KMetric.MeanSquaredError(name=f'accuracy-mean', dtype=tf.float32)
-        self.acc2_metric = SpearmanCorrMetric(name=f'accuracy-corr', dtype=tf.float32)
+        self.loss_metric = KMetric.Mean(name=f'loss', dtype=tf.float32)
+        self.ms_metric = KMetric.MeanSquaredError(name=f'accuracy-mean', dtype=tf.float32)
+        self.corr_metric = SpearmanCorrMetric(name=f'accuracy-corr', dtype=tf.float32)
 
     def call(self, inputs: tf.Tensor, training=False):
         """Call the model
@@ -160,9 +160,12 @@ class Diqa(KM.Model):
             else self.subjective(inputs)
         )
 
+    def build(self):
+        super().build(input_shape=self._input_shape)
+
     @property
     def metrics(self):
-        return [self.o_loss_metric, self.s_loss_metric, self.acc1_metric, self.acc2_metric]
+        return [self.loss_metric, self.ms_metric, self.corr_metric]
 
     def compile(self, optimizer, loss_fn, current_ops=None):
         """State output is set to subjective by default, re-compile if you want
@@ -192,8 +195,9 @@ class Diqa(KM.Model):
             else self.s_step(data, train_step=True)
         )
 
+    @tf.function
     def o_step(self, data, train_step=False):
-        dist, dist_gray, ref_gray, mos = data
+        (dist, dist_gray, ref_gray), mos = data
 
         e_gt, r = calculate_error_map(dist_gray, ref_gray, scaling_factor=self.scaling_factor)
         if train_step:
@@ -203,45 +207,40 @@ class Diqa(KM.Model):
             loss_value = self.loss_fn(self, dist, e_gt, r)
 
         err_pred = self(dist)
-        _shape = tf.TensorShape([e_gt.shape[0], tf.reduce_prod(e_gt.shape[1:]).numpy()])
+        
+        self.loss_metric.update_state(loss_value)
+        self.ms_metric.update_state(e_gt, err_pred)
 
-        err_pred = tf.reshape(err_pred, shape=_shape)
-        e_gt = tf.reshape(e_gt, shape=_shape)
-
-        self.o_loss_metric.update_state(loss_value)
-        self.acc1_metric.update_state(e_gt, err_pred)
-
-        # return loss, acc
         return {
-            "accuracy": self.acc1_metric.result(),
-            "loss": self.o_loss_metric.result(),
+            "accuracy": self.ms_metric.result(),
+            "loss": self.loss_metric.result(),
         }
 
+    @tf.function
     def s_step(self, data, train_step=False):
-        distorted, dist_gray, reference, mos = data
+        (distorted, dist_gray, reference), mos = data
         if train_step:
             # Train here subjective loss
             with tf.GradientTape() as tape:
                 preds = self.subjective(distorted)
                 g_loss = self.loss_fn(preds, mos)
-            grads = tape.gradient(g_loss, self.subjective.trainable_weights)
-            self.optimizer.apply_gradients(zip(grads, self.subjective.trainable_weights))
+            grads = tape.gradient(g_loss, self.trainable_weights)
+            self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
         else:
+            preds = self.subjective(distorted)
             g_loss = self.loss_fn(preds, mos)
 
-        self.s_loss_metric.update_state(g_loss)
-        self.acc1_metric.update_state(mos, preds)
+        self.loss_metric.update_state(g_loss)
+        self.ms_metric.update_state(mos, preds)
 
-        # return loss, acc
         return {
-            "accuracy": self.acc1_metric.result(),
-            "loss": self.s_loss_metric.result(),
+            "accuracy": self.ms_metric.result(),
+            "loss": self.loss_metric.result(),
         }
 
     def __get_model_fname(self, saved_path, prefix, model_type):
         now = time.strftime(DTF_DATETIMET)
-        filename, ext = os.path.splitext(MODEL_FILE_NAME)
-        model_path = os.path.join(saved_path, f"{prefix}-{filename}-{model_type}-{now}{ext}")
+        model_path = os.path.join(saved_path, f"{prefix}-{model_type}-{now}")
         return model_path
 
     def save_pretrained(self, saved_path, prefix=None, model_path=None):

@@ -45,6 +45,7 @@ class Evaluation:
             loss_fn=cond_loss_fn,
             current_ops=self.network
         )
+        self.diqa.build()
         model_path = Path(model_dir) / weight_file
         self.diqa.load_weights(model_path)
         self.metric = SpearmanCorrMetric()
