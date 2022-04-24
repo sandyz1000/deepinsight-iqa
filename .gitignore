@@ -132,5 +132,6 @@ dmypy.json
 .vscode
 .DS_Store
 weights/*
+chk_tmp/*
 logs/*
 examples/*
