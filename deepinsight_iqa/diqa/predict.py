@@ -2,7 +2,7 @@ import sys
 import os
 from typing import Optional
 import tensorflow as tf
-from .networks.model import Diqa
+from .networks.model import SubjectiveModel, get_bottleneck
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from time import perf_counter
 import logging
@@ -46,24 +46,17 @@ class Prediction:
     ):
         try:
             self.channel_dim = 3
-            bottleneck_layer_name = kwds.pop('bottleneck', None)
-            network = kwds.pop('network', 'subjective')
-            self.diqa = Diqa(model_type, bottleneck_layer_name)
-            
-            cond_loss_fn = (
-                loss_fn
-                if self.network == 'objective'
-                else KLosses.MeanSquaredError(name=f'{self.network}_losses')
-            )
+            bn_layer = kwds.pop('bottleneck', None)
+            bottleneck = get_bottleneck(model_type, bn_layer=bn_layer)
+            self.diqa = SubjectiveModel(model_type, bottleneck)
             
             self.diqa.compile(
                 optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
-                loss_fn=cond_loss_fn,
-                current_ops=self.network
+                loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
             )
             self.diqa.build()
             model_path = Path(model_dir) / weight_file
-            self.diqa.load_weights(model_path, prefix=network)
+            self.diqa.load_weights(model_path)
         
         except Exception as e:
             print("Unable to load DIQA model, check model path", str(e))
@@ -104,7 +97,7 @@ class Prediction:
             img_preprocessing=image_preprocess
         )
 
-        predictions = self.diqa.subjective.predict_generator(
+        predictions = self.diqa.predict_generator(
             X_data,
             workers=1,
             use_multiprocessing=False,

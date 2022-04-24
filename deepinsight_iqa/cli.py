@@ -13,7 +13,7 @@ from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.trainer import Trainer as DiqaTrainer
 from deepinsight_iqa.nima.train import Train as NimaTrainer
-from deepinsight_iqa.diqa import TRAINING_MODELS, SUBJECTIVE_NW, OBJECTIVE_NW
+from deepinsight_iqa.diqa import TRAINING_MODELS, SUBJECTIVE_NET, OBJECTIVE_NET
 
 
 @click.command()
@@ -48,7 +48,7 @@ def predict(algo, conf_file, base_dir, weight_file, image_filepath):
     elif algo == "diqa":
 
         cf_model_dir = cfg.pop('model_dir', 'weights/diqa')
-        cf_network = cfg.pop('network', SUBJECTIVE_NW)
+        cf_network = cfg.pop('network', SUBJECTIVE_NET)
 
         network = network if network else cf_network
         model_dir = base_dir if base_dir else cf_model_dir
@@ -149,7 +149,7 @@ def train(
         print(f"Setting pretrained model type to {base_dir}")
 
         cf_model_dir = cfg.pop('model_dir', 'weights/diqa')
-        cf_network = cfg.pop('network', SUBJECTIVE_NW)
+        cf_network = cfg.pop('network', SUBJECTIVE_NET)
 
         network = network if network else cf_network
         model_dir = base_dir if base_dir else cf_model_dir

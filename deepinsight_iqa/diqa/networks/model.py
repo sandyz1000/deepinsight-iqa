@@ -16,7 +16,7 @@ from tensorflow.keras import metrics as KMetric
 from .. import (
     CUSTOM_MODEL_TYPE,
     IMAGENET_MODEL_TYPE,
-    OBJECTIVE_NW,
+    OBJECTIVE_NET,
     DTF_DATETIMET
 )
 from .utils import gradient, calculate_error_map, SpearmanCorrMetric
@@ -30,7 +30,7 @@ def generate_random_name(batch_size, epochs):
 
 def get_bottleneck(
     model_type: str, *,
-    bottleneck: str = None,
+    bn_layer: str = None,
     train_bottleneck: bool = True
 ) -> KM.Model:
     """Get the bottleneck layer given the name
@@ -49,10 +49,10 @@ def get_bottleneck(
     if model_type == IMAGENET_MODEL_TYPE:
 
         model_params = dict(input_shape=(None, None, 3), include_top=False, weights="imagenet")
-        if bottleneck not in mapping.keys():
+        if bn_layer not in mapping.keys():
             raise ValueError("Invalid model_name, enter from given options ")
 
-        model = mapping[bottleneck](**model_params)  # type: KM.Model
+        model = mapping[bn_layer](**model_params)  # type: KM.Model
 
     elif model_type == CUSTOM_MODEL_TYPE:
         model = tf.keras.Sequential(
@@ -80,7 +80,7 @@ def get_bottleneck(
 
 class DiqaMixin:
     
-    def compile(self, optimizer, loss_fn):
+    def compile(self, optimizer=None, loss_fn=None, **kwds):
         """State output is set to subjective by default, re-compile if you want
         the model to return objective output
 
@@ -89,7 +89,7 @@ class DiqaMixin:
         :param _type_ metrics: _description_, defaults to []
         :param _type_ out_state: _description_, defaults to None
         """
-        super().compile()
+        super().compile(**kwds)
         self.optimizer = optimizer
         self.loss_fn = loss_fn
 
@@ -109,20 +109,21 @@ class DiqaMixin:
         self.save(model_path, save_format='tf')
 
 
-class ObjectiveModel(KM.Model, DiqaMixin):
+class ObjectiveModel(DiqaMixin, KM.Model):
     """
     ## Objective Error Model AKA "objective_error_map"
     For the training phase, it is convenient to utilize the *tf.data* input pipelines to produce a 
     much cleaner and readable code. The only requirement is to create the function to apply to the input.
     """
 
-    def __init__(self, bottleneck: KM.Model, custom: bool = False, kwds={}) -> None:
-        super(ObjectiveModel, self).__init__()
+    def __init__(self, bottleneck: KM.Model, scaling_factor, custom: bool = False, kwds={}) -> None:
+        super().__init__()
         self.custom = custom
+        self.model_type = kwds
         self.bottleneck = bottleneck
         self.loss_fn = None
         self.optimizer = None
-        self.scaling_factor = kwds['scaling_factor']
+        self.scaling_factor = scaling_factor
 
         self._input_shape = self.bottleneck.input_shape
 
@@ -187,7 +188,7 @@ class ObjectiveModel(KM.Model, DiqaMixin):
         }
 
 
-class SubjectiveModel(KM.Model, DiqaMixin):
+class SubjectiveModel(DiqaMixin, KM.Model):
     """
     ## Subjective Model
 
@@ -209,9 +210,9 @@ class SubjectiveModel(KM.Model, DiqaMixin):
             use_pretrained {bool} -- [description] (default: {False})
     """
 
-    def __init__(self, bottleneck: KM.Model) -> None:
-        super(SubjectiveModel, self).__init__()
-        # self.name = 'subjective_error_map'
+    def __init__(self, bottleneck: KM.Model, kwds={}) -> None:
+        super().__init__()
+        self.model_type = kwds
         self.bottleneck = bottleneck
         self.loss_fn = None
         self.optimizer = None
@@ -225,9 +226,6 @@ class SubjectiveModel(KM.Model, DiqaMixin):
         self.dense1 = KL.Dense(128, activation='relu')
         self.dense2 = KL.Dense(128, activation='relu')
         self.final = KL.Dense(1)
-
-    def build(self):
-        super().build(input_shape=self._input_shape)
 
     @property
     def metrics(self):
@@ -249,18 +247,18 @@ class SubjectiveModel(KM.Model, DiqaMixin):
     def train_step(self, data):
         return self.s_step(data, train_step=True)
         
-    @tf.function
+    # @tf.function
     def s_step(self, data, train_step=False):
         (distorted, dist_gray, reference), mos = data
         if train_step:
             # Train here subjective loss
             with tf.GradientTape() as tape:
-                preds = self.subjective(distorted)
+                preds = self(distorted)
                 g_loss = self.loss_fn(preds, mos)
             grads = tape.gradient(g_loss, self.trainable_weights)
             self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
         else:
-            preds = self.subjective(distorted)
+            preds = self(distorted)
             g_loss = self.loss_fn(preds, mos)
 
         self.loss_metric.update_state(g_loss)

@@ -3,7 +3,7 @@ import numpy as np
 import tensorflow as tf
 from typing import Union, Tuple, Optional
 from deepinsight_iqa.common.utility import thread_safe_singleton
-from .networks.model import Diqa
+from .networks.model import SubjectiveModel, get_bottleneck
 from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.networks.utils import SpearmanCorrMetric
@@ -32,18 +32,12 @@ class Evaluation:
         self.batch_size = kwargs.pop('batch_size', batch_size)
         self.out_path = out_path
 
-        bottleneck_layer_name = kwargs.pop('bottleneck', None)
-        self.diqa = Diqa(model_type, bottleneck_layer_name)
-        cond_loss_fn = (
-            loss_fn
-            if self.network == 'objective'
-            else KLosses.MeanSquaredError(name=f'{self.network}_losses')
-        )
-
+        bn_layer = kwargs.pop('bottleneck', None)
+        bottleneck = get_bottleneck(model_type, bn_layer=bn_layer)
+        self.diqa = SubjectiveModel(model_type, bottleneck)
         self.diqa.compile(
             optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
-            loss_fn=cond_loss_fn,
-            current_ops=self.network
+            loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
         )
         self.diqa.build()
         model_path = Path(model_dir) / weight_file

@@ -44,9 +44,9 @@ train, valid = get_iqa_datagen(
     do_train=True
 )
 # %%
-it = iter(train)
-X_dist, dist_gray, X_ref, Y = next(it)
-plt.imshow(X_ref[0], cmap='gray')
+# it = iter(train)
+# X_dist, dist_gray, X_ref, Y = next(it)
+# plt.imshow(X_ref[0], cmap='gray')
 # %%
 network = 'objective'
 if 'network' in cfg:
@@ -61,19 +61,26 @@ trainer = Trainer(
     model_dir=model_dir,
     **cfg
 )
-diqa = trainer.compile(train_bottleneck=True)
+
+diqa = trainer.compile(network=network)
 diqa.build()
 # %%
 weight_file = cfg.pop('weight_file', 'weights/diqa/objective-diqa-diqa_custom-2022-04-23T23:29:26')
 model_path = Path(model_dir) / weight_file
-trainer.load_weights(diqa, model_path)
+trainer.load_weights(diqa, "weights/diqa/custom/temp")
 
 # %%
 # trainer.slow_trainer(diqa)
-trainer.epochs = 9
 trainer.train(diqa)
 # %%
 trainer.save_weights(diqa)
+# %%
+subj = trainer.compile(network='subjective')
+subj.build()
+# %%
+# trainer.train(subj)
+trainer.slow_trainer(subj)
+# %%
 # diqa.save("temp-1", save_format='tf')
 # %%
 image_dir, csv_path = "/Volumes/SDM/Dataset/iqa", "technical/combine.csv"

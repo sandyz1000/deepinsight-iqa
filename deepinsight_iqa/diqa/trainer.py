@@ -16,8 +16,8 @@ from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 # from keras import losses as KLosses
 # from keras.callbacks import ModelCheckpoint, TensorBoard
 
-from . import OBJECTIVE_NW, SUBJECTIVE_NW
-from .networks.model import ObjectiveModel, get_bottleneck, SubjectiveModel
+from . import OBJECTIVE_NET, SUBJECTIVE_NET
+from .networks.model import ObjectiveModel, get_bottleneck, SubjectiveModel, DiqaMixin
 from .networks.utils import loss_fn
 from deepinsight_iqa.common.utility import get_stream_handler
 from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaDataGenerator
@@ -84,10 +84,10 @@ class Trainer:
 
         self.train_datagen = train_datagen  # type: DiqaDataGenerator
         self.valid_datagen = valid_datagen  # type: DiqaDataGenerator
-
+        self.custom = self.model_type == "diqa_custom"
         self.bottleneck = get_bottleneck(
             self.model_type,
-            self.bottleneck_layer,
+            bn_layer=self.bottleneck_layer,
             train_bottleneck=kwargs['train_bottleneck']
         )
 
@@ -99,7 +99,7 @@ class Trainer:
             self.valid_datagen.steps_per_epoch = min(kwargs['validation_steps'],
                                                      self.valid_datagen.steps_per_epoch)
 
-    def train(self, diqa):
+    def train(self, diqa: DiqaMixin):
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
         model_path = diqa._get_model_fname(self.model_dir, self.network, self.model_type)
         model_checkpointer = ModelCheckpoint(
@@ -122,16 +122,18 @@ class Trainer:
             callbacks=[model_checkpointer, tbc]
         )
 
-    def compile(self, custom=False, kwds={}):
+    def compile(self, network=None):
+        
         cond_loss_fn = (
             loss_fn
-            if self.network == OBJECTIVE_NW
+            if network == OBJECTIVE_NET
             else KLosses.MeanSquaredError(name=f'{self.network}_losses')
         )
-        if self.network == OBJECTIVE_NW:
-            diqa = ObjectiveModel(self.bottleneck, custom=custom, kwds=kwds)
+        kwds = {"model_type": self.model_type}
+        if network == OBJECTIVE_NET:
+            diqa = ObjectiveModel(self.bottleneck, self.kwargs['scaling_factor'], custom=self.custom, kwds=kwds)
         else:
-            diqa = SubjectiveModel(self.bottleneck)
+            diqa = SubjectiveModel(self.bottleneck, kwds=kwds)
         diqa.compile(
             optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
             loss_fn=cond_loss_fn
@@ -200,11 +202,11 @@ class Trainer:
                 template = f"Epoch {epoch + 1}, Loss: {metrics['logs']}, Accuracy: {metrics['accuracy']}"
             print(template)
 
-    def reset_state(self, diqa: Diqa):
+    def reset_state(self, diqa: DiqaMixin):
         # Reset metrics every epoch
         diqa.ms_metric.reset_states()
         diqa.loss_metric.reset_states()
         diqa.corr_metric.reset_states()
 
-    def save_weights(self, diqa: Diqa):
+    def save_weights(self, diqa: DiqaMixin):
         diqa.save_pretrained(self.model_dir, prefix=self.network)
