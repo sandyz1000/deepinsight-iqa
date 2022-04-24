@@ -14,7 +14,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 # import keras.models as KM
 # from keras import metrics as KMetric
 # from keras import losses as KLosses
-from keras.callbacks import ModelCheckpoint, TensorBoard
+# from keras.callbacks import ModelCheckpoint, TensorBoard
 
 from . import OBJECTIVE_NETWORK, SUBJECTIVE_NETWORK
 from .networks.model import ObjectiveModel, get_bottleneck, SubjectiveModel, DiqaMixin
@@ -198,12 +198,6 @@ class Trainer:
             else:
                 template = f"Epoch {epoch + 1}, Loss: {metrics['logs']}, Accuracy: {metrics['accuracy']}"
             print(template)
-
-    def reset_state(self, diqa: DiqaMixin):
-        # Reset metrics every epoch
-        diqa.ms_metric.reset_states()
-        diqa.loss_metric.reset_states()
-        diqa.corr_metric.reset_states()
 
     def save_weights(self, diqa: DiqaMixin, model_path=None):
         diqa.save_pretrained(self.model_dir, prefix=self.network, model_path=model_path)

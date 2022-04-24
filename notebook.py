@@ -24,8 +24,8 @@ job_dir = os.path.realpath(os.path.curdir)
 # %%
 image_dir = "image_quality_data/data"
 csv_path = "combine.csv"
-# cfg_path = "configs/diqa/default.json"
-cfg_path = "configs/diqa/inceptionv3.json"
+cfg_path = "configs/diqa/default.json"
+# cfg_path = "configs/diqa/inceptionv3.json"
 # cfg_path = "configs/diqa/mobilenet.json"
 # cfg_path = "configs/diqa/resnetv2.json"
 # resolve_config_path = (lambda cfg_path: Path(os.path.dirname(__file__)) / cfg_path)
@@ -53,32 +53,38 @@ if 'network' in cfg:
 model_dir = cfg.pop('model_dir', 'weights/diqa')
 
 # %%
-cfg['epochs'] = 1
+cfg['epochs'] = 3
+cfg["train_bottleneck"] = True
 trainer = Trainer(
     train, valid,
     network=network,
     model_dir=model_dir,
     **cfg
 )
-
-diqa = trainer.compile(network=network)  # Model
+# %%
+diqa = trainer.compile(network='objective')  # Model
 diqa.build()
 # %%
 # trainer.load_weights(diqa, model_path=Path("weights/diqa/custom/"))
-diqa.load_weights("weights/inception/objective/")
+diqa.load_weights("weights/customv2/objective")
 # %%
 # trainer.slow_trainer(diqa)
-trainer.train(diqa, checkpoint_dir='chk_tmp/inception/objective')
+trainer.train(diqa, checkpoint_dir='chk_tmp/customv2/objective')
 # %%
-diqa.save_weights("weights/inception/objective", save_format='tf')
+diqa.save_weights("weights/customv2/objective", save_format='tf')
 # trainer.save_weights(diqa, model_path=Path("weights/diqa/custom/"))
 
 # %%
+trainer.bottleneck.trainable = True
 subj = trainer.compile(network='subjective')
 subj.build()
 # %%
-trainer.epochs = 19
-trainer.train(subj, checkpoint_dir='chk_tmp/inception/sub')
+trainer.epochs = 20
+trainer.train(subj, checkpoint_dir='chk_tmp/customv2/subjective')
 # trainer.slow_trainer(subj)
 # %%
-subj.save_weights("weights/inception/subjective/", save_format='tf')
+subj.save_weights("weights/customv2/subjective/", save_format='tf')
+
+# %%
+subj.load_weights("weights/customv2/subjective/")
+# %%

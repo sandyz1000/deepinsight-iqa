@@ -205,6 +205,11 @@ class ObjectiveModel(DiqaMixin, KM.Model):
             "loss": self.loss_metric.result(),
         }
 
+    def reset_state(self):
+        self.ms_metric.reset_states()
+        self.loss_metric.reset_states()
+        # self.corr_metric.reset_states()
+
 
 @tf.keras.utils.register_keras_serializable()
 class SubjectiveModel(DiqaMixin, KM.Model):
@@ -286,3 +291,7 @@ class SubjectiveModel(DiqaMixin, KM.Model):
             "accuracy": self.ms_metric.result(),
             "loss": self.loss_metric.result(),
         }
+
+    def reset_state(self):
+        self.ms_metric.reset_states()
+        self.loss_metric.reset_states()
