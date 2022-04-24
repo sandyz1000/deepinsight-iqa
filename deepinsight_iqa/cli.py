@@ -13,7 +13,7 @@ from deepinsight_iqa.diqa.data import get_iqa_datagen
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.trainer import Trainer as DiqaTrainer
 from deepinsight_iqa.nima.train import Train as NimaTrainer
-from deepinsight_iqa.diqa import TRAINING_MODELS, SUBJECTIVE_NET, OBJECTIVE_NET
+from deepinsight_iqa.diqa import TRAINING_MODELS, SUBJECTIVE_NETWORK, OBJECTIVE_NETWORK
 
 
 @click.command()
@@ -48,7 +48,7 @@ def predict(algo, conf_file, base_dir, weight_file, image_filepath):
     elif algo == "diqa":
 
         cf_model_dir = cfg.pop('model_dir', 'weights/diqa')
-        cf_network = cfg.pop('network', SUBJECTIVE_NET)
+        cf_network = cfg.pop('network', SUBJECTIVE_NETWORK)
 
         network = network if network else cf_network
         model_dir = base_dir if base_dir else cf_model_dir
@@ -96,8 +96,7 @@ def train(
         image_dir,
         input_file,
         model_dir=None,
-        network=None,
-        weight_fname=None
+        network=None
     ):
         dataset_type = cfg.pop('dataset_type', None)
         model_dir = model_dir if model_dir \
@@ -123,16 +122,19 @@ def train(
             train_generator,
             valid_datagen=valid_generator,
             model_dir=model_dir,
-            network=network,
-            weight_file=weight_fname,
             **cfg
         )
-        diqa = trainer.compile(train_bottleneck=cfg['train_bottleneck'])
-        diqa.build()
+
+        # NOTE: Check for finetune i.e only subjective model
         if trainer.use_pretrained:
-            trainer.load_weights(diqa)
+            diqa = trainer.compile(network=cfg['pretrained_network'])
+            diqa.build()
+            trainer.load_weights(diqa, model_path=weight_file)
         
-        trainer.slow_trainer(diqa)
+        diqa = trainer.compile(network=network)
+        diqa.build()
+        
+        trainer.train(diqa)
         trainer.save_weights(diqa)
 
     def train_nima(cfg, image_dir, base_dir, input_file):
@@ -149,7 +151,7 @@ def train(
         print(f"Setting pretrained model type to {base_dir}")
 
         cf_model_dir = cfg.pop('model_dir', 'weights/diqa')
-        cf_network = cfg.pop('network', SUBJECTIVE_NET)
+        cf_network = cfg.pop('network', SUBJECTIVE_NETWORK)
 
         network = network if network else cf_network
         model_dir = base_dir if base_dir else cf_model_dir
@@ -158,8 +160,7 @@ def train(
             image_dir,
             input_file,
             model_dir=model_dir,
-            network=network,
-            weight_fname=weight_file
+            network=network
         )
 
 

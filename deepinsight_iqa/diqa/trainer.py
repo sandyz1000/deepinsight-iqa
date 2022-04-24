@@ -14,9 +14,9 @@ from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 # import keras.models as KM
 # from keras import metrics as KMetric
 # from keras import losses as KLosses
-# from keras.callbacks import ModelCheckpoint, TensorBoard
+from keras.callbacks import ModelCheckpoint, TensorBoard
 
-from . import OBJECTIVE_NET, SUBJECTIVE_NET
+from . import OBJECTIVE_NETWORK, SUBJECTIVE_NETWORK
 from .networks.model import ObjectiveModel, get_bottleneck, SubjectiveModel, DiqaMixin
 from .networks.utils import loss_fn
 from deepinsight_iqa.common.utility import get_stream_handler
@@ -69,7 +69,7 @@ class Trainer:
         """
         self.bottleneck_layer = kwargs.pop('bottleneck', None)
         self.model_type = kwargs.pop('model_type', None)
-        self.network = kwargs.get('network', 'subjective')
+        self.network = kwargs.get('network')
         self.epochs = epochs
         self.model_dir = model_dir
         self.log_dir = Path(log_dir)
@@ -99,11 +99,16 @@ class Trainer:
             self.valid_datagen.steps_per_epoch = min(kwargs['validation_steps'],
                                                      self.valid_datagen.steps_per_epoch)
 
-    def train(self, diqa: DiqaMixin):
+    def train(self, diqa: DiqaMixin, checkpoint_dir='tmp/checkpoints/'):
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
-        model_path = diqa._get_model_fname(self.model_dir, self.network, self.model_type)
+        if checkpoint_dir is None:
+            checkpoint_dir = diqa._get_model_fname(
+                self.model_dir,
+                self.network,
+                self.model_type).as_posix() + '/'
+
         model_checkpointer = ModelCheckpoint(
-            filepath=model_path,
+            filepath=checkpoint_dir,
             monitor='val_loss',
             verbose=1,
             save_best_only=True,
@@ -124,13 +129,14 @@ class Trainer:
 
     def compile(self, network=None):
         
+        self.network = network
         cond_loss_fn = (
             loss_fn
-            if network == OBJECTIVE_NET
+            if network == OBJECTIVE_NETWORK
             else KLosses.MeanSquaredError(name=f'{self.network}_losses')
         )
         kwds = {"model_type": self.model_type}
-        if network == OBJECTIVE_NET:
+        if network == OBJECTIVE_NETWORK:
             diqa = ObjectiveModel(self.bottleneck, self.kwargs['scaling_factor'], custom=self.custom, kwds=kwds)
         else:
             diqa = SubjectiveModel(self.bottleneck, kwds=kwds)
@@ -140,16 +146,7 @@ class Trainer:
         )
 
         return diqa
-    
-    def load_weights(self, diqa: KM.Model, model_path: str):
-        if not os.path.exists(model_path):
-            model_path = Path(self.model_dir) / model_path
 
-        if model_path.exists():
-            diqa.load_weights(model_path)
-        else:
-            print(f"Model path {model_path} not found, training from start!!")
-        
     def slow_trainer(self, diqa):
 
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
@@ -208,5 +205,8 @@ class Trainer:
         diqa.loss_metric.reset_states()
         diqa.corr_metric.reset_states()
 
-    def save_weights(self, diqa: DiqaMixin):
-        diqa.save_pretrained(self.model_dir, prefix=self.network)
+    def save_weights(self, diqa: DiqaMixin, model_path=None):
+        diqa.save_pretrained(self.model_dir, prefix=self.network, model_path=model_path)
+
+    def load_weights(self, diqa: DiqaMixin, model_path: Path):
+        diqa.load_pretrained(self.model_dir, model_path)

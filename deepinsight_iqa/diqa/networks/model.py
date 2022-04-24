@@ -1,7 +1,7 @@
 import os
 import time
 import tensorflow as tf
-
+from pathlib import Path
 import tensorflow.keras.layers as KL
 import tensorflow.keras.applications as KA
 import tensorflow.keras.models as KM
@@ -16,7 +16,6 @@ from tensorflow.keras import metrics as KMetric
 from .. import (
     CUSTOM_MODEL_TYPE,
     IMAGENET_MODEL_TYPE,
-    OBJECTIVE_NET,
     DTF_DATETIMET
 )
 from .utils import gradient, calculate_error_map, SpearmanCorrMetric
@@ -96,19 +95,38 @@ class DiqaMixin:
     def build(self):
         super().build(input_shape=self._input_shape)
 
-    def _get_model_fname(self, saved_path, prefix, model_type):
+    def _get_model_fname(self, model_dir, prefix, model_type):
         now = time.strftime(DTF_DATETIMET)
-        model_path = os.path.join(saved_path, f"{prefix}-{model_type}-{now}")
+        pathfmt = "{}-{}-{}".format(prefix, model_type, now)
+        model_path = Path(model_dir, pathfmt)
         return model_path
 
-    def save_pretrained(self, saved_path, prefix=None, model_path=None):
+    def load_pretrained(self, model_dir, model_path: Path = None):
+        """Helper function to verify and load weight in safe manner
+
+        :param _type_ diqa: _description_
+        :param _type_ model_path: _description_, defaults to None
+        :raises FileNotFoundError: _description_
+        """
+        assert model_path and isinstance(model_path, Path), TypeError("Should be of type pathlib.Path")
+        
+        if not model_path.exists():
+            model_path = Path(model_dir) / model_path
+
+        if model_path.exists():
+            self.load_weights(model_path.as_posix() + '/')
+        else:
+            raise FileNotFoundError(f"Model path {model_path} not found")
+
+    def save_pretrained(self, model_dir, prefix='subjective', model_path: Path = None):
         """Save config and weights to file"""
 
-        os.makedirs(saved_path, exist_ok=True)
-        model_path = model_path or self._get_model_fname(saved_path, prefix, self.model_type)
-        self.save(model_path, save_format='tf')
+        os.makedirs(model_dir, exist_ok=True)
+        model_path = model_path or self._get_model_fname(model_dir, prefix, self.model_type)
+        self.save_weights(model_path.as_posix() + '/', save_format='tf')
 
 
+@tf.keras.utils.register_keras_serializable()
 class ObjectiveModel(DiqaMixin, KM.Model):
     """
     ## Objective Error Model AKA "objective_error_map"
@@ -188,6 +206,7 @@ class ObjectiveModel(DiqaMixin, KM.Model):
         }
 
 
+@tf.keras.utils.register_keras_serializable()
 class SubjectiveModel(DiqaMixin, KM.Model):
     """
     ## Subjective Model
@@ -220,7 +239,6 @@ class SubjectiveModel(DiqaMixin, KM.Model):
 
         self.loss_metric = KMetric.Mean(name=f'loss', dtype=tf.float32)
         self.ms_metric = KMetric.MeanSquaredError(name=f'accuracy-mean', dtype=tf.float32)
-        self.corr_metric = SpearmanCorrMetric(name=f'accuracy-corr', dtype=tf.float32)
 
         self.gap = KL.GlobalAveragePooling2D(data_format='channels_last')
         self.dense1 = KL.Dense(128, activation='relu')
@@ -229,7 +247,7 @@ class SubjectiveModel(DiqaMixin, KM.Model):
 
     @property
     def metrics(self):
-        return [self.loss_metric, self.ms_metric, self.corr_metric]
+        return [self.loss_metric, self.ms_metric]
 
     def call(self, input_tensor: tf.Tensor):
         out = self.bottleneck(input_tensor)
@@ -247,7 +265,7 @@ class SubjectiveModel(DiqaMixin, KM.Model):
     def train_step(self, data):
         return self.s_step(data, train_step=True)
         
-    # @tf.function
+    @tf.function
     def s_step(self, data, train_step=False):
         (distorted, dist_gray, reference), mos = data
         if train_step:

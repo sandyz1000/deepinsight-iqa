@@ -37,7 +37,7 @@ class Evaluation:
         self.diqa = SubjectiveModel(model_type, bottleneck)
         self.diqa.compile(
             optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
-            loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
+            # loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
         )
         self.diqa.build()
         model_path = Path(model_dir) / weight_file

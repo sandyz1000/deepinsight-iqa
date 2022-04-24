@@ -5,9 +5,9 @@ __author__ = "Sandip Dey"
 CUSTOM_MODEL_TYPE = "diqa_custom"
 IMAGENET_MODEL_TYPE = 'imagenet'
 
-SUBJECTIVE_NET = 'subjective'
-OBJECTIVE_NET = 'objective'
-TRAINING_MODELS = [SUBJECTIVE_NET, OBJECTIVE_NET]
+SUBJECTIVE_NETWORK = 'subjective'
+OBJECTIVE_NETWORK = 'objective'
+TRAINING_MODELS = [SUBJECTIVE_NETWORK, OBJECTIVE_NETWORK]
 
 # Date time format
 DTF_DATETIME = '%Y%m%d-%H%M%S'

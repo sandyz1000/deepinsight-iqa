@@ -9,6 +9,7 @@
 	"use_augmentation": true,
 	"batch_size": 8,
 	"use_pretrained": false,
+	"pretrained_network": "objective",
 	"channel_dim": 3,
 	"train_bottleneck": true,
 	"epochs": 10,
