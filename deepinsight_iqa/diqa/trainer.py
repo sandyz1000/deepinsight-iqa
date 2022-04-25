@@ -17,11 +17,12 @@ from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 # from keras.callbacks import ModelCheckpoint, TensorBoard
 
 from . import OBJECTIVE_NETWORK, SUBJECTIVE_NETWORK
-from .networks.model import ObjectiveModel, get_bottleneck, SubjectiveModel, DiqaMixin
+from .networks.model import ObjectiveModel, get_bottleneck, SubjectiveModel
 from .networks.utils import loss_fn
 from deepinsight_iqa.common.utility import get_stream_handler
 from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaDataGenerator
 
+MODEL_TYPE = Union[SubjectiveModel, ObjectiveModel]
 logger = logging.getLogger(__name__)
 logger.addHandler(get_stream_handler())
 logger.info(
@@ -99,7 +100,7 @@ class Trainer:
             self.valid_datagen.steps_per_epoch = min(kwargs['validation_steps'],
                                                      self.valid_datagen.steps_per_epoch)
 
-    def train(self, diqa: DiqaMixin, checkpoint_dir='tmp/checkpoints/'):
+    def train(self, diqa: MODEL_TYPE, checkpoint_dir='tmp/checkpoints/'):
         tbc = TensorBoard(log_dir=self.log_dir, histogram_freq=1)
         if checkpoint_dir is None:
             checkpoint_dir = diqa._get_model_fname(
@@ -199,8 +200,8 @@ class Trainer:
                 template = f"Epoch {epoch + 1}, Loss: {metrics['logs']}, Accuracy: {metrics['accuracy']}"
             print(template)
 
-    def save_weights(self, diqa: DiqaMixin, model_path=None):
+    def save_weights(self, diqa: MODEL_TYPE, model_path=None):
         diqa.save_pretrained(self.model_dir, prefix=self.network, model_path=model_path)
 
-    def load_weights(self, diqa: DiqaMixin, model_path: Path):
+    def load_weights(self, diqa: MODEL_TYPE, model_path: Path):
         diqa.load_pretrained(self.model_dir, model_path)

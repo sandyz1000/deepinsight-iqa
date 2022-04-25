@@ -5,7 +5,6 @@ from pathlib import Path
 import tensorflow.keras.layers as KL
 import tensorflow.keras.applications as KA
 import tensorflow.keras.models as KM
-from tensorflow.keras import losses as KLosses
 from tensorflow.keras import metrics as KMetric
 
 # import keras.layers as KL
