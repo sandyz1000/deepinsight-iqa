@@ -2,13 +2,16 @@ import os
 import time
 import tensorflow as tf
 from pathlib import Path
+from tensorflow import keras
 import tensorflow.keras.layers as KL
-import tensorflow.keras.applications as KA
 import tensorflow.keras.models as KM
 from tensorflow.keras import metrics as KMetric
+from tensorflow.keras.applications import InceptionResNetV2, InceptionV3, MobileNet
 
 # import keras.layers as KL
-# import keras.applications as KA
+# from keras.applications.mobilenet import MobileNet
+# from keras.applications.inception_v3 import InceptionV3
+# from keras.applications.inception_resnet_v2 import InceptionResNetV2
 # import keras.models as KM
 # from keras import metrics as KMetric
 
@@ -17,7 +20,7 @@ from .. import (
     IMAGENET_MODEL_TYPE,
     DTF_DATETIMET
 )
-from .utils import gradient, calculate_error_map, SpearmanCorrMetric
+from .utils import gradient, SpearmanCorrMetric
 
 
 def generate_random_name(batch_size, epochs):
@@ -39,9 +42,9 @@ def get_bottleneck(
     """
     mapping = \
         {
-            "InceptionV3": KA.InceptionV3,
-            "MobileNet": KA.MobileNet,
-            "InceptionResNetV2": KA.InceptionResNetV2
+            "InceptionV3": InceptionV3,
+            "MobileNet": MobileNet,
+            "InceptionResNetV2": InceptionResNetV2
         }
 
     if model_type == IMAGENET_MODEL_TYPE:
@@ -133,14 +136,13 @@ class ObjectiveModel(DiqaMixin, KM.Model):
     much cleaner and readable code. The only requirement is to create the function to apply to the input.
     """
 
-    def __init__(self, bottleneck: KM.Model, scaling_factor, custom: bool = False, kwds={}) -> None:
+    def __init__(self, bottleneck: KM.Model, custom: bool = False, kwds={}) -> None:
         super().__init__()
         self.custom = custom
         self.model_type = kwds
         self.bottleneck = bottleneck
         self.loss_fn = None
         self.optimizer = None
-        self.scaling_factor = scaling_factor
 
         self._input_shape = self.bottleneck.input_shape
 
@@ -185,9 +187,8 @@ class ObjectiveModel(DiqaMixin, KM.Model):
 
     @tf.function
     def o_step(self, data, train_step=False):
-        (dist, dist_gray, ref_gray), mos = data
+        (dist, X_ref, e_gt, r), mos = data
 
-        e_gt, r = calculate_error_map(dist_gray, ref_gray, scaling_factor=self.scaling_factor)
         if train_step:
             loss_value, gradients = gradient(self, dist, e_gt, r)
             self.optimizer.apply_gradients(zip(gradients, self.trainable_weights))
@@ -271,7 +272,7 @@ class SubjectiveModel(DiqaMixin, KM.Model):
         
     @tf.function
     def s_step(self, data, train_step=False):
-        (distorted, dist_gray, reference), mos = data
+        (distorted, X_ref, e_gt, r), mos = data
         if train_step:
             # Train here subjective loss
             with tf.GradientTape() as tape:

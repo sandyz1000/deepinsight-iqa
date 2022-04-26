@@ -3,6 +3,7 @@ import random
 from typing import Tuple, Callable, Dict, List, Union
 import pandas as pd
 from deepinsight_iqa.common import image_aug
+from deepinsight_iqa.diqa.networks.utils import calculate_error_map
 import tensorflow as tf
 import numpy as np
 from functools import partial
@@ -69,6 +70,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         df: pd.DataFrame,
         batch_size: int = 32,
         img_preprocessing: Callable = None,
+        image_normalization: Callable = None,
         input_size: Tuple[int] = (256, 256),
         img_crop_dims: Tuple[int] = (224, 224),
         shuffle: bool = False,
@@ -84,6 +86,7 @@ class DiqaDataGenerator(tf.keras.utils.Sequence):
         self.img_dir = img_dir
         self.batch_size = batch_size
         self.img_preprocessing = img_preprocessing
+        self.image_normalization = image_normalization
         self.input_size = input_size  # dimensions that images get resized into when loaded
         self.img_crop_dims = img_crop_dims  # dimensions that images get randomly cropped to
         self.data_generator = self.__train_datagen__ if shuffle else self.__eval_datagen__
@@ -393,11 +396,13 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         samples: np.ndarray,
         batch_size: int = 32,
         img_preprocessing: Callable = None,
+        image_normalization: Callable = None,
         input_size: Tuple[int] = (256, 256),
         img_crop_dims: Tuple[int] = (224, 224),
         do_train: bool = False,
         do_augment: bool = False,
         channel_dim: int = 3,
+        scaling_factor: float = 1 / 38
     ) -> None:
         """ Predict Generator that will generate batch of images from a folder
 
@@ -416,10 +421,12 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         self.image_dir = image_dir
         self.batch_size = batch_size
         self.img_preprocessing = img_preprocessing
+        self.image_normalization = image_normalization
         self.input_size = input_size
         self.channel_dim = channel_dim
         self.img_crop_dims = img_crop_dims
         self.do_augment = do_augment
+        self.scaling_factor = scaling_factor
         self.data_generator = self.__train_generator if self.do_train else self.__batch_generator
         self.steps_per_epoch = int(np.floor(len(self.samples) / self.batch_size))
         self.on_epoch_end()
@@ -453,7 +460,14 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
                 continue
 
             if self.img_preprocessing:
-                dist_img, ref_img = [tf.squeeze(self.img_preprocessing(im), axis=0) for im in [dist_img, ref_img]]
+                dist_img, ref_img = [
+                    tf.squeeze(self.img_preprocessing(im), axis=0)
+                    for im in [dist_img, ref_img]
+                ]
+            
+            if self.image_normalization:
+                dist_img = self.image_normalization(dist_img)
+                ref_img = self.image_normalization(ref_img)
 
             dist_img, ref_img = [
                 tf.tile(im, (1, 1, self.channel_dim))
@@ -474,7 +488,11 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
         
         X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
         dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
-        return [X_dist, dist_gray, X_ref], mos
+        e_gt, r = calculate_error_map(dist_gray, X_ref, scaling_factor=self.scaling_factor)
+        if self.image_normalization:
+            e_gt, r = [self.image_normalization(im) for im in [e_gt, r]]
+        
+        return [X_dist, X_ref, e_gt, r], mos
 
     def __batch_generator(self, batch_samples):
         X = []
@@ -485,6 +503,9 @@ class DiqaCombineDataGen(tf.keras.utils.Sequence):
 
             if self.img_preprocessing:
                 dist_im = tf.squeeze(self.img_preprocessing(dist_im), axis=0)
+
+            if self.image_normalization:
+                dist_im = self.image_normalization(dist_im)
 
             dist_im = tf.tile(
                 dist_im, (1, 1, self.channel_dim)
@@ -584,7 +605,11 @@ class get_train_datagenerator:
         X_dist, X_ref, Y = [tf.cast(dty, dtype=tf.float32) for dty in [X_dist, X_ref, Y]]
         X_ref = tf.slice(X_ref, begin=[0, 0, 0, 0], size=X_ref.shape[:-1] + [1])
         dist_gray = tf.slice(X_dist, begin=[0, 0, 0, 0], size=X_dist.shape[:-1] + [1])
-        return [X_dist, dist_gray, X_ref], Y
+        e_gt, r = calculate_error_map(dist_gray, X_ref, scaling_factor=self.scaling_factor)
+        if self.image_normalization:
+            e_gt, r = [self.image_normalization(im) for im in [e_gt, r]]
+        
+        return [X_dist, X_ref, e_gt, r], Y
 
 
 class get_batch_datagenerator:

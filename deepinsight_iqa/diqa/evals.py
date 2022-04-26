@@ -4,7 +4,7 @@ import tensorflow as tf
 from typing import Union, Tuple, Optional
 from deepinsight_iqa.common.utility import thread_safe_singleton
 from .networks.model import SubjectiveModel, get_bottleneck
-from deepinsight_iqa.diqa.data import get_iqa_datagen
+from deepinsight_iqa.diqa.data import get_iqa_datagen, save_json
 from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
 from deepinsight_iqa.diqa.networks.utils import SpearmanCorrMetric
 from .networks.utils import loss_fn
@@ -28,21 +28,26 @@ class Evaluation:
         Use pearson and spearman correlation matrix for evaluation, we can also use RMSE error to 
         calculate the mean differences
         """
-        self.kwargs = kwargs
-        self.batch_size = kwargs.pop('batch_size', batch_size)
-        self.out_path = out_path
-
-        bn_layer = kwargs.pop('bottleneck', None)
-        bottleneck = get_bottleneck(model_type, bn_layer=bn_layer)
-        self.diqa = SubjectiveModel(model_type, bottleneck)
-        self.diqa.compile(
-            optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
-            # loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
-        )
-        self.diqa.build()
-        model_path = Path(model_dir) / weight_file
-        self.diqa.load_weights(model_path)
-        self.metric = SpearmanCorrMetric()
+        try:
+            self.kwargs = kwargs
+            self.batch_size = kwargs.pop('batch_size', batch_size)
+            self.out_path = out_path
+            assert model_type, AttributeError("Invalid model type")
+            self.channel_dim = kwargs.pop('channel_dim', 3)
+            bn_layer = kwargs.pop('bottleneck', None)
+            bottleneck = get_bottleneck(model_type, bn_layer=bn_layer)
+            self.diqa = SubjectiveModel(bottleneck)
+            self.diqa.compile(
+                optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
+                # loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
+            )
+            self.diqa.build()
+            model_path = (Path(model_dir) / weight_file).as_posix() + '/'
+            self.diqa.load_weights(model_path)
+            self.metric = SpearmanCorrMetric()
+        except Exception as e:
+            print("Unable to load DIQA model, check model path")
+            raise e
 
     def img_pair_score(
         self,
@@ -66,11 +71,6 @@ class Evaluation:
         ref_prediction = self.diqa.subjective.predict(I_r)[0][0]
         return dist_prediction, ref_prediction
 
-    def save_json(self, data, target_file):
-        import json
-        with Path(target_file).open('w') as f:
-            json.dump(data, f, indent=2, sort_keys=True)
-
     def __call__(self, image_dir, csv_path=None, prediction_file=None):
 
         datagen = get_iqa_datagen(
@@ -81,7 +81,7 @@ class Evaluation:
             input_size=self.kwargs['input_size'],
             do_augment=False,
             do_train=False,
-            channel_dim=self.kwargs['channel_dim'],
+            channel_dim=self.channel_dim,
             batch_size=self.batch_size,
             split_dataset=False
         )
@@ -101,7 +101,8 @@ class Evaluation:
             })
             self.metric.update_state(pred, gt)
 
-        self.save_json(outputs, prediction_file)
+        if prediction_file:
+            save_json(outputs, prediction_file)
         result = self.metric.result()
         self.metric.reset_states()
         print(f">> Overall Score: {result} >>")

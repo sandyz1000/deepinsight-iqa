@@ -3,6 +3,7 @@ import json
 import click
 import sys
 from typing import Dict, List, Any
+from functools import partial, reduce
 from pathlib import Path
 from deepinsight_iqa.nima.predict import Prediction as NimaPrediction
 from deepinsight_iqa.diqa.predict import Prediction as DiqaPrediction
@@ -10,7 +11,7 @@ from deepinsight_iqa.diqa.evals import Evaluation as DiqaEvaluation
 from deepinsight_iqa.nima.evals import Evaluation as NimaEvaluation
 from deepinsight_iqa.data_pipeline import (TFDatasetType, TFRecordDataset)
 from deepinsight_iqa.diqa.data import get_iqa_datagen
-from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
+from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess, image_normalization
 from deepinsight_iqa.diqa.trainer import Trainer as DiqaTrainer
 from deepinsight_iqa.nima.train import Train as NimaTrainer
 from deepinsight_iqa.diqa import TRAINING_MODELS, SUBJECTIVE_NETWORK, OBJECTIVE_NETWORK
@@ -39,8 +40,9 @@ def predict(algo, conf_file, base_dir, weight_file, image_filepath):
     # Script use to predict Image quality using Deep image quality assesement
     cfg = parse_config(conf_file)
     if algo == "nima":
+        weight_file = Path(base_dir, weight_file).as_posix()
         prediction = NimaPrediction(
-            weights_file=Path(base_dir, weight_file),
+            weights_file=weight_file,
             base_model_name=cfg['bottleneck']
         )
         score = prediction.predict(image_filepath, predictions_file='output.json')
@@ -48,16 +50,15 @@ def predict(algo, conf_file, base_dir, weight_file, image_filepath):
     elif algo == "diqa":
 
         cf_model_dir = cfg.pop('model_dir', 'weights/diqa')
-        cf_network = cfg.pop('network', SUBJECTIVE_NETWORK)
 
-        network = network if network else cf_network
+        network = cfg.pop('network', SUBJECTIVE_NETWORK)
         model_dir = base_dir if base_dir else cf_model_dir
 
         prediction = DiqaPrediction(
             model_dir=model_dir,
             weight_file=weight_file,
-            model_type=cfg['model_type'],
-            network=network
+            network=network,
+            **cfg
         )
         score = prediction.predict(image_filepath)
     
@@ -105,7 +106,13 @@ def train(
         # NOTE: Based on dataset_type init the corresponding datagenerator
         input_file = input_file if os.path.exists(input_file) \
             else os.path.join(image_dir, input_file)
-
+        
+        img_preprocess_fn = partial(
+            reduce,
+            lambda x, y: y(x),
+            [image_preprocess, partial(image_normalization, new_min=0, new_max=1)]
+        )
+        
         train_generator, valid_generator = get_iqa_datagen(
             image_dir,
             input_file,

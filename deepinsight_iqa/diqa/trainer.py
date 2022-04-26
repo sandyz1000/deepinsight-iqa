@@ -138,14 +138,14 @@ class Trainer:
         )
         kwds = {"model_type": self.model_type}
         if network == OBJECTIVE_NETWORK:
-            diqa = ObjectiveModel(self.bottleneck, self.kwargs['scaling_factor'], custom=self.custom, kwds=kwds)
+            diqa = ObjectiveModel(self.bottleneck, custom=self.custom, kwds=kwds)
         else:
             diqa = SubjectiveModel(self.bottleneck, kwds=kwds)
         diqa.compile(
             optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
+            # optimizer=tf.train.GradientDescentOptimizer(learning_rate=0.01),
             loss_fn=cond_loss_fn
         )
-
         return diqa
 
     def slow_trainer(self, diqa):

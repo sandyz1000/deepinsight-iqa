@@ -34,6 +34,7 @@ def get_iqa_tfds(
     csv_path: str,
     dataset_type: str,
     image_preprocess: Callable = None,
+    image_normalization: Callable = None,
     do_augment: bool = False,
     input_size: Tuple = (256, 256),
     batch_size: int = 8,
@@ -70,6 +71,7 @@ def get_iqa_tfds(
         output_shapes=output_shapes,
         output_types=output_types,
         img_preprocessing=image_preprocess,
+        image_normalization=image_normalization,
         do_augment=do_augment,
         input_size=input_size,
         channel_dim=channel_dim,
@@ -84,6 +86,7 @@ def get_iqa_tfds(
         output_shapes=output_shapes,
         output_types=output_types,
         img_preprocessing=image_preprocess,
+        image_normalization=image_normalization,
         do_augment=False,
         input_size=input_size,
         channel_dim=channel_dim,
@@ -99,6 +102,7 @@ def get_iqa_datagen(
     csv_path: str,
     dataset_type: str = None,
     image_preprocess: Callable = None,
+    image_normalization: Callable = None,
     do_augment=False,
     input_size=None,
     batch_size=8,
@@ -129,6 +133,7 @@ def get_iqa_datagen(
         samples_train,
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
+        image_normalization=image_normalization,
         do_augment=do_augment,
         input_size=input_size,
         channel_dim=channel_dim,
@@ -141,6 +146,7 @@ def get_iqa_datagen(
         samples_test,
         batch_size=batch_size,
         img_preprocessing=image_preprocess,
+        image_normalization=image_normalization,
         do_augment=False,
         input_size=input_size,
         channel_dim=channel_dim,
@@ -149,3 +155,9 @@ def get_iqa_datagen(
     ) if split_dataset else None
 
     return train_datagen, valid_datagen
+
+
+def save_json(data, target_file):
+    import json
+    with Path(target_file).open('w') as f:
+        json.dump(data, f, indent=2, sort_keys=True)

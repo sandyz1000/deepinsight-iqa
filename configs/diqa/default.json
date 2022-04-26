@@ -3,6 +3,7 @@
 	"network": "subjective",
 	"log_dir": "logs/custom",
 	"model_type": "diqa_custom",
+	"bottleneck": "custom",
 	"dataset_type": null,
 	"existing_weights": null,
 	"use_augmentation": true,
@@ -20,7 +21,6 @@
 	"dropout_rate": 0.75,
 	"multiprocessing_data_load": true,
 	"num_workers_data_load": 2,
-	"custom": false,
 	"input_size": null,
 	"scaling_factor": 0.0625
 }

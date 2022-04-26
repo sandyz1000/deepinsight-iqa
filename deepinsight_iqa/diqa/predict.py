@@ -3,9 +3,10 @@ import os
 from typing import Optional
 import tensorflow as tf
 from .networks.model import SubjectiveModel, get_bottleneck
-from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess
+from deepinsight_iqa.diqa.utils.tf_imgutils import image_preprocess, image_normalization
 from time import perf_counter
 import logging
+from functools import partial, reduce
 import numpy as np
 from typing import Union, Tuple
 import cv2
@@ -15,6 +16,7 @@ from .networks.utils import loss_fn
 from tensorflow.keras import losses as KLosses
 import glob
 from deepinsight_iqa.data_pipeline.diqa_gen.datagenerator import DiqaCombineDataGen
+from deepinsight_iqa.diqa.data import get_iqa_datagen, save_json
 
 logger = logging.getLogger(__name__)
 from deepinsight_iqa.common.utility import thread_safe_singleton
@@ -45,22 +47,23 @@ class Prediction:
         **kwds
     ):
         try:
-            self.channel_dim = 3
+            assert model_type, AttributeError("Invalid model type")
+            self.channel_dim = kwds.pop('channel_dim', 3)
             bn_layer = kwds.pop('bottleneck', None)
             bottleneck = get_bottleneck(model_type, bn_layer=bn_layer)
-            self.diqa = SubjectiveModel(model_type, bottleneck)
-            
+            self.diqa = SubjectiveModel(bottleneck)
+
             self.diqa.compile(
                 optimizer=tf.optimizers.Nadam(learning_rate=2 * 10 ** -4),
-                # loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
+                loss_fn=KLosses.MeanSquaredError(name=f'subjective_losses')
             )
             self.diqa.build()
-            model_path = Path(model_dir) / weight_file
+            model_path = (Path(model_dir) / weight_file).as_posix() + '/'
             self.diqa.load_weights(model_path)
-        
+
         except Exception as e:
-            print("Unable to load DIQA model, check model path", str(e))
-            sys.exit(1)
+            print("Unable to load DIQA model, check model path")
+            raise e
 
     def predict(self, img: Union[np.ndarray, str]) -> float:
         if isinstance(img, str) and not os.path.exists(img):
@@ -73,7 +76,13 @@ class Prediction:
         img = tf.cast(img, dtype=tf.float32)
 
         start = perf_counter()
-        I_d = image_preprocess(img)
+        img_preprocess_fn = partial(
+            reduce,
+            lambda x, y: y(x),
+            [image_preprocess, partial(image_normalization, new_min=0, new_max=1)]
+        )
+        # I_d = image_preprocess(img)
+        I_d = img_preprocess_fn(img)
         end = perf_counter()
         logger.debug(f"IQA preprocessing function image_preprocess took {end-start} seconds")
 
@@ -86,17 +95,23 @@ class Prediction:
         logger.info(f"final IQA score is {prediction}")
         return prediction
 
-    def predict_batch(self, img_dir, batch_size=3,):
+    def predict_batch(self, img_dir: int, batch_size: int = 3, prediction_file: str = None):
         start = perf_counter()
         samples = image_dir_to_json(img_dir)
         images = [row['path'] for row in samples]
+        img_preprocess_fn = partial(
+            reduce,
+            lambda x, y: y(x),
+            [image_preprocess, partial(image_normalization, new_min=0, new_max=1)]
+        )
+        
         X_data = DiqaCombineDataGen(
             image_dir=img_dir,
             samples=images,
             batch_size=batch_size,
-            img_preprocessing=image_preprocess
+            img_preprocessing=img_preprocess_fn
         )
-
+        
         predictions = self.diqa.predict_generator(
             X_data,
             workers=1,
@@ -104,7 +119,9 @@ class Prediction:
             verbose=1
         )
         for i, sample in enumerate(samples):
-            sample['score'] = predictions[i]
+            sample['score'] = predictions[i][0]
         end = perf_counter()
         logger.debug(f"Predictions on batch of {batch_size} took {end-start} seconds")
+        if prediction_file:
+            save_json(samples, prediction_file)
         return samples
